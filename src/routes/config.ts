@@ -45,13 +45,19 @@ const ENGINE_JS = { version: 11, url: 'https://cfg.ymusic.io/static/engine_ymusi
  * No cache headers on purpose — caching is the reverse proxy's job, and a Cache-Control set here
  * would override whatever it decides.
  */
+/** Node hands a repeated header over as an array; a client sending one twice gets the first. */
+function header(value: string | string[] | undefined): string | undefined {
+  return Array.isArray(value) ? value[0] : value
+}
+
 export default async function configRoutes(app: FastifyInstance): Promise<void> {
   app.get('/v1/config', (req) => {
-    const query = req.query as Record<string, string | undefined>
-    const os = (query.os ?? '').toLowerCase()
+    // os/appVer ride as headers on every API call; only per-call params stay in the query
+    // (deviceId, unused here so far). Fastify lowercases header names.
+    const os = (header(req.headers['x-os']) ?? '').toLowerCase()
     // || not ??: parseInt returns NaN, which is nullish to nobody, and NaN < anything is false — so
     // a junk appVer would silently mean "up to date" rather than falling back to -1.
-    const appVer = Number.parseInt(query.appVer ?? '', 10) || -1
+    const appVer = Number.parseInt(header(req.headers['x-app-ver']) ?? '', 10) || -1
 
     const release = RELEASES[os]
 
