@@ -52,8 +52,8 @@ function header(value: string | string[] | undefined): string | undefined {
 
 export default async function configRoutes(app: FastifyInstance): Promise<void> {
   app.get('/v1/config', (req) => {
-    // os/appVer ride as headers on every API call; only per-call params stay in the query
-    // (deviceId, unused here so far). Fastify lowercases header names.
+    // The common context — os, appVer, device uuid — rides as headers on every API call; this
+    // route only reads the first two. Fastify lowercases header names.
     const os = (header(req.headers['x-os']) ?? '').toLowerCase()
     // || not ??: parseInt returns NaN, which is nullish to nobody, and NaN < anything is false — so
     // a junk appVer would silently mean "up to date" rather than falling back to -1.

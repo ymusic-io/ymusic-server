@@ -9,12 +9,12 @@ const BUNDLES = {
   engineJs: { version: expect.any(Number), url: expect.any(String) },
 }
 
-/** os/appVer ride as headers on every API call; only deviceId stays in the query. */
+/** The common context — os, appVer, device uuid — rides as headers on every API call. */
 function get(os?: string, appVer?: string, deviceId = 'abc') {
-  const headers: Record<string, string> = {}
+  const headers: Record<string, string> = { 'x-device-id': deviceId }
   if (os !== undefined) headers['x-os'] = os
   if (appVer !== undefined) headers['x-app-ver'] = appVer
-  return app.inject({ url: `/v1/config?deviceId=${deviceId}`, headers })
+  return app.inject({ url: '/v1/config', headers })
 }
 
 beforeEach(async () => {
