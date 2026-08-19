@@ -120,11 +120,17 @@ export class Analytics {
       }
       await client.query('COMMIT')
     } catch (error) {
-      await client.query('ROLLBACK').catch(() => {})
+      // A failed ROLLBACK means the CONNECTION is broken, not just the transaction: destroy
+      // it (release(true)) rather than hand a dead socket back to the pool.
+      try {
+        await client.query('ROLLBACK')
+        client.release()
+      } catch {
+        client.release(true)
+      }
       throw error
-    } finally {
-      client.release()
     }
+    client.release()
   }
 
   async close(): Promise<void> {
