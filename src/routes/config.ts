@@ -1,4 +1,5 @@
 import type { FastifyInstance } from 'fastify'
+import { header } from '../headers.js'
 
 /** An available build. [checksum] is sha256 of the bytes at [url]. */
 export interface NewVersion {
@@ -45,11 +46,6 @@ const ENGINE_JS = { version: 11, url: 'https://cfg.ymusic.io/static/engine_ymusi
  * No cache headers on purpose — caching is the reverse proxy's job, and a Cache-Control set here
  * would override whatever it decides.
  */
-/** Node hands a repeated header over as an array; a client sending one twice gets the first. */
-function header(value: string | string[] | undefined): string | undefined {
-  return Array.isArray(value) ? value[0] : value
-}
-
 export default async function configRoutes(app: FastifyInstance): Promise<void> {
   app.get('/v1/config', (req) => {
     // The common context — os, appVer, device uuid — rides as headers on every API call; this
