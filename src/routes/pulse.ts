@@ -8,9 +8,22 @@ const COUNTRY = /^[a-z]{2}$/i
 /** Junk device clocks must not pollute history: anything older than this is dropped. */
 const MAX_EVENT_AGE_MS = 60 * 24 * 60 * 60 * 1000
 
-/** The advisory write-skip cookie: the last UTC day this device's activity was credited. */
+/** The advisory write-skip cookie: the last day this device's activity was credited. */
 const ACTIVITY_COOKIE = 'act'
 const ACTIVITY_COOKIE_MAX_AGE_S = 2 * 24 * 60 * 60
+
+/**
+ * THE definition of a calendar "day" for analytics: the DATABASE's timezone, +07 (Asia/
+ * Ho_Chi_Minh, pinned with -c timezone= in ymusic-docker-configs/compose.yml). Deriving buckets
+ * in the same zone the DB casts in means current_date, date(created_at) and daily_activity.day
+ * all agree without any AT TIME ZONE in the queries. +07 has never had DST, so a fixed offset
+ * is exact. Change one side, change the other.
+ */
+const DAY_OFFSET_MS = 7 * 60 * 60 * 1000
+
+function dayOf(at: Date): string {
+  return new Date(at.getTime() + DAY_OFFSET_MS).toISOString().slice(0, 10)
+}
 
 /**
  * Anonymous usage pulses. The client batches on disk and posts at most every half hour; context
@@ -48,7 +61,7 @@ export default async function pulseRoutes(app: FastifyInstance): Promise<void> {
       }
       const clamped = new Date(Math.min(at, now)) // a future clock credits today, not tomorrow
       accepted.push({ name, at: clamped, values })
-      days.add(clamped.toISOString().slice(0, 10))
+      days.add(dayOf(clamped))
     }
 
     const deviceId = header(req.headers['x-device-id'])?.toLowerCase()

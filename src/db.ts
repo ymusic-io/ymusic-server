@@ -117,11 +117,11 @@ export class Analytics {
     country: string | null
     events: AcceptedEvent[]
     /**
-     * UTC days to credit as 'YYYY-MM-DD'; empty when the activity cookie already covered the
-     * batch. Strings, not Dates, on purpose: a day is a calendar bucket, and a Date would be
-     * re-bucketed through the SERVER's timezone on the timestamptz→date cast (this DB runs
-     * TZ=Asia/Ho_Chi_Minh) — the string casts to ::date verbatim, and compares against the
-     * cookie value by plain equality.
+     * Days to credit as 'YYYY-MM-DD', bucketed in the DB's own timezone (+07 — see dayOf in
+     * pulse.ts, THE single place a day is derived); empty when the activity cookie already
+     * covered the batch. Strings, not Dates, on purpose: a Date would be re-bucketed on the
+     * timestamptz→date cast, while the string casts to ::date verbatim and compares against
+     * the cookie value by plain equality.
      */
     days: string[]
   }): Promise<void> {
