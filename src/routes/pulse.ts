@@ -1,5 +1,5 @@
 import type { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify'
-import { EVENTS, type AcceptedEvent } from '../db.js'
+import { EVENTS, type AcceptedEvent, type EventContext } from '../db.js'
 import { header } from '../headers.js'
 
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i
@@ -51,6 +51,15 @@ export default async function pulseRoutes(app: FastifyInstance): Promise<void> {
     }
     const now = Date.now()
 
+    const deviceId = header(req.headers['x-device-id'])?.toLowerCase()
+    const rawCountry = header(req.headers['cf-ipcountry'])
+    const ctx: EventContext = {
+      os: (header(req.headers['x-os']) ?? '').toLowerCase(),
+      osVersion: header(req.headers['x-os-ver']) ?? '',
+      appVersion: Number.parseInt(header(req.headers['x-app-ver']) ?? '', 10) || -1,
+      country: rawCountry && COUNTRY.test(rawCountry) ? rawCountry.toUpperCase() : null,
+    }
+
     const accepted: AcceptedEvent[] = []
     const days = new Set<string>()
     let dropped = 0
@@ -62,8 +71,8 @@ export default async function pulseRoutes(app: FastifyInstance): Promise<void> {
         dropped++
         continue
       }
-      // The event's own handler turns the wire props into its columns; null = malformed.
-      const values = def.values(stringProps((item as { props?: unknown }).props))
+      // The event's own handler turns the wire props + context into its columns; null = malformed.
+      const values = def.values(stringProps((item as { props?: unknown }).props), ctx)
       if (values === null) {
         dropped++
         continue
@@ -72,12 +81,6 @@ export default async function pulseRoutes(app: FastifyInstance): Promise<void> {
       accepted.push({ name, at: clamped, values })
       days.add(dayOf(clamped))
     }
-
-    const deviceId = header(req.headers['x-device-id'])?.toLowerCase()
-    const appVersion = Number.parseInt(header(req.headers['x-app-ver']) ?? '', 10) || -1
-    const os = (header(req.headers['x-os']) ?? '').toLowerCase()
-    const rawCountry = header(req.headers['cf-ipcountry'])
-    const country = rawCountry && COUNTRY.test(rawCountry) ? rawCountry.toUpperCase() : null
 
     req.log.info({ count: raw.length, accepted: accepted.length, dropped, device: deviceId }, 'pulse')
     if (!app.analytics || !deviceId || !UUID.test(deviceId) || accepted.length === 0) {
@@ -94,9 +97,10 @@ export default async function pulseRoutes(app: FastifyInstance): Promise<void> {
     try {
       await app.analytics.ingest({
         deviceId,
-        os,
-        appVersion,
-        country,
+        os: ctx.os,
+        osVersion: ctx.osVersion,
+        appVersion: ctx.appVersion,
+        country: ctx.country,
         events: accepted,
         days: creditDays,
       })

@@ -8,12 +8,20 @@ import pg from 'pg'
  * here plus its CREATE TABLE in [MIGRATION] (and the client recording it); an unknown name from
  * the wire is dropped at the route, never stored, never DDL'd.
  */
+/** The request-level context every handler may draw on, parsed from the common headers. */
+export interface EventContext {
+  os: string
+  osVersion: string
+  appVersion: number
+  country: string | null
+}
+
 export interface EventDef {
   table: string
   /** Columns beyond (device_id, at), filled by [values] in the same order. */
   columns: readonly string[]
-  /** Parse the wire props into column values; null = malformed, drop the event. */
-  values(props: Record<string, string>): unknown[] | null
+  /** Turn the wire props + request context into column values; null = malformed, drop it. */
+  values(props: Record<string, string>, ctx: EventContext): unknown[] | null
 }
 
 export const EVENTS: Record<string, EventDef> = {
@@ -24,11 +32,11 @@ export const EVENTS: Record<string, EventDef> = {
   },
   app_update: {
     table: 'event_app_update',
-    columns: ['from_version', 'to_version'],
-    values: (props) => {
+    columns: ['os', 'from_version', 'to_version'],
+    values: (props, ctx) => {
       const from = Number.parseInt(props.fromVersion ?? '', 10)
       const to = Number.parseInt(props.toVersion ?? '', 10)
-      return Number.isInteger(from) && Number.isInteger(to) ? [from, to] : null
+      return Number.isInteger(from) && Number.isInteger(to) ? [ctx.os, from, to] : null
     },
   },
 }
@@ -42,6 +50,7 @@ const MIGRATION = `
 CREATE TABLE IF NOT EXISTS devices (
   id          uuid PRIMARY KEY,
   os          text NOT NULL,
+  os_version  text,
   app_version integer NOT NULL,
   country     text,
   created_at  timestamptz NOT NULL,
@@ -62,10 +71,15 @@ CREATE TABLE IF NOT EXISTS event_app_update (
   device_id    uuid NOT NULL,
   at           timestamptz NOT NULL,
   received_at  timestamptz NOT NULL DEFAULT now(),
+  os           text,
   from_version integer NOT NULL,
   to_version   integer NOT NULL
 );
 CREATE INDEX IF NOT EXISTS event_app_update_at ON event_app_update (at);
+-- Columns added after a table already shipped: IF NOT EXISTS on both sides keeps this
+-- migration a pure statement of the current shape.
+ALTER TABLE devices ADD COLUMN IF NOT EXISTS os_version text;
+ALTER TABLE event_app_update ADD COLUMN IF NOT EXISTS os text;
 `
 
 /** [dsn] should be the ymusic_server role; the cert files come from the private DB CA. */
@@ -113,6 +127,7 @@ export class Analytics {
   async ingest(input: {
     deviceId: string
     os: string
+    osVersion: string
     appVersion: number
     country: string | null
     events: AcceptedEvent[]
@@ -135,10 +150,11 @@ export class Analytics {
     if (input.days.length > 0) {
       ctes.push(
         `dev AS (
-           INSERT INTO devices (id, os, app_version, country, created_at, updated_at)
-           VALUES (${bind(input.deviceId)}, ${bind(input.os)}, ${bind(input.appVersion)}, ${bind(input.country)}, now(), now())
+           INSERT INTO devices (id, os, os_version, app_version, country, created_at, updated_at)
+           VALUES (${bind(input.deviceId)}, ${bind(input.os)}, ${bind(input.osVersion)}, ${bind(input.appVersion)}, ${bind(input.country)}, now(), now())
            ON CONFLICT (id) DO UPDATE SET
              os = EXCLUDED.os,
+             os_version = EXCLUDED.os_version,
              app_version = EXCLUDED.app_version,
              country = COALESCE(EXCLUDED.country, devices.country),
              updated_at = now())`,

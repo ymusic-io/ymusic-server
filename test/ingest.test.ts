@@ -56,6 +56,7 @@ describe.runIf(!!DSN)('POST /v1/pulse against live postgres', () => {
       url: '/v1/pulse',
       headers: {
         'x-os': 'windows',
+        'x-os-ver': '11',
         'x-app-ver': '1233',
         'x-device-id': device,
         'cf-ipcountry': 'VN',
@@ -74,8 +75,8 @@ describe.runIf(!!DSN)('POST /v1/pulse against live postgres', () => {
     expect(res.statusCode).toBe(204)
     expect(res.headers['set-cookie']).toMatch(/^act=/)
 
-    const dev = await db.query('SELECT os, app_version, country FROM devices WHERE id = $1', [device])
-    expect(dev.rows[0]).toEqual({ os: 'windows', app_version: 1233, country: 'VN' })
+    const dev = await db.query('SELECT os, os_version, app_version, country FROM devices WHERE id = $1', [device])
+    expect(dev.rows[0]).toEqual({ os: 'windows', os_version: '11', app_version: 1233, country: 'VN' })
     const days = await db.query('SELECT count(*)::int AS n FROM daily_activity WHERE device_id = $1', [device])
     expect(days.rows[0].n).toBe(1)
     const events = await db.query('SELECT count(*)::int AS n FROM event_app_start WHERE device_id = $1', [device])
@@ -120,10 +121,10 @@ describe.runIf(!!DSN)('POST /v1/pulse against live postgres', () => {
 
     expect(res.statusCode).toBe(204)
     const rows = await db.query(
-      'SELECT from_version, to_version FROM event_app_update WHERE device_id = $1',
+      'SELECT os, from_version, to_version FROM event_app_update WHERE device_id = $1',
       [device],
     )
-    expect(rows.rows).toEqual([{ from_version: 1233, to_version: 1234 }])
+    expect(rows.rows).toEqual([{ os: 'windows', from_version: 1233, to_version: 1234 }])
   })
 
   it('a tampered cookie falls back to the normal write path', async () => {
