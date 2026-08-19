@@ -97,6 +97,21 @@ describe.runIf(!!DSN)('POST /v1/pulse against live postgres', () => {
     expect(events.rows[0].n).toBeGreaterThanOrEqual(3) // events always land
   })
 
+  it('the watermark credits only days after it — an older event re-credits nothing', async () => {
+    const first = await post([{ name: 'app_start', at: Date.now() }])
+    const cookie = (first.headers['set-cookie'] as string).split(';')[0]
+    const before = await db.query('SELECT count(*)::int AS n FROM daily_activity WHERE device_id = $1', [device])
+
+    // Yesterday < the cookie's last credited day: filtered out, no device/activity write at all.
+    const res = await post([{ name: 'app_start', at: Date.now() - 24 * 60 * 60 * 1000 }], cookie)
+
+    expect(res.statusCode).toBe(204)
+    const after = await db.query('SELECT count(*)::int AS n FROM daily_activity WHERE device_id = $1', [device])
+    expect(after.rows[0].n).toBe(before.rows[0].n)
+    // And the watermark did not rewind to yesterday.
+    expect((res.headers['set-cookie'] as string).split(';')[0]).toBe(cookie)
+  })
+
   it('an event handler turns props into typed columns, and rejects malformed ones', async () => {
     const res = await post([
       { name: 'app_update', at: Date.now(), props: { fromVersion: '1233', toVersion: '1234' } },

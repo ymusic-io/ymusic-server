@@ -84,12 +84,13 @@ export default async function pulseRoutes(app: FastifyInstance): Promise<void> {
       return reply.code(204).send()
     }
 
-    // The signed cookie is the server's own past statement of the last credited day; when it
-    // covers every day in the batch, the device/activity writes are skipped. Absent, invalid or
-    // stale, it falls through to the normal transaction — ON CONFLICT stays the guarantee.
+    // The signed cookie is the server's own watermark: the last day it credited for this
+    // device. Only days AFTER it need crediting ('YYYY-MM-DD' compares as text; the client
+    // sends oldest→newest, so a backlog batch spanning days credits exactly the uncovered
+    // tail). Absent or invalid reads as "credit everything" — ON CONFLICT stays the guarantee.
     const cookieDay = readActivityCookie(req)
-    const allDays = [...days].sort()
-    const covered = cookieDay !== undefined && allDays.every((day) => day === cookieDay)
+    const batchDays = [...days].sort()
+    const creditDays = cookieDay === undefined ? batchDays : batchDays.filter((day) => day > cookieDay)
     try {
       await app.analytics.ingest({
         deviceId,
@@ -97,13 +98,15 @@ export default async function pulseRoutes(app: FastifyInstance): Promise<void> {
         appVersion,
         country,
         events: accepted,
-        days: covered ? [] : allDays,
+        days: creditDays,
       })
     } catch (error) {
       req.log.error({ err: error }, 'pulse ingest failed — client will retry from its queue')
       return reply.code(500).send()
     }
-    setActivityCookie(reply, allDays.at(-1)!)
+    // The watermark only moves forward: a batch of old events must not rewind it.
+    const lastDay = batchDays.at(-1)!
+    setActivityCookie(reply, cookieDay !== undefined && cookieDay > lastDay ? cookieDay : lastDay)
     return reply.code(204).send()
   })
 }
