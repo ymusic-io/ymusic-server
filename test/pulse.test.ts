@@ -37,6 +37,14 @@ describe('POST /v1/pulse', () => {
     ).toBe(204)
   })
 
+  it('rejects a batch over 15 events whole — the client must chunk', async () => {
+    const events = Array.from({ length: 16 }, (_, i) => ({ name: 'app_start', at: 1000 + i }))
+
+    const res = await app.inject({ method: 'POST', url: '/v1/pulse', payload: { events } })
+
+    expect(res.statusCode).toBe(413)
+  })
+
   it('is POST only', async () => {
     expect((await app.inject('/v1/pulse')).statusCode).toBe(404)
   })

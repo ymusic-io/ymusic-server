@@ -8,6 +8,9 @@ const COUNTRY = /^[a-z]{2}$/i
 /** Junk device clocks must not pollute history: anything older than this is dropped. */
 const MAX_EVENT_AGE_MS = 60 * 24 * 60 * 60 * 1000
 
+/** Wire contract: the client chunks its queue to this many events per pulse; more is a 413. */
+const MAX_EVENTS_PER_BATCH = 15
+
 /** The advisory write-skip cookie: the last day this device's activity was credited. */
 const ACTIVITY_COOKIE = 'act'
 const ACTIVITY_COOKIE_MAX_AGE_S = 2 * 24 * 60 * 60
@@ -40,6 +43,12 @@ export default async function pulseRoutes(app: FastifyInstance): Promise<void> {
   app.post('/v1/pulse', async (req, reply) => {
     const body = req.body as { events?: unknown } | null
     const raw = Array.isArray(body?.events) ? body.events : []
+    if (raw.length > MAX_EVENTS_PER_BATCH) {
+      // Rejected whole, nothing processed: a conforming client never sends this, so it is a
+      // client bug to surface loudly, not an input to accommodate.
+      req.log.warn({ count: raw.length, device: header(req.headers['x-device-id']) }, 'pulse batch over the cap')
+      return reply.code(413).send()
+    }
     const now = Date.now()
 
     const accepted: AcceptedEvent[] = []
