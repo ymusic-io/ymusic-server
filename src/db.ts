@@ -116,7 +116,13 @@ export class Analytics {
     appVersion: number
     country: string | null
     events: AcceptedEvent[]
-    /** UTC days to credit; empty when the activity cookie already covered the batch. */
+    /**
+     * UTC days to credit as 'YYYY-MM-DD'; empty when the activity cookie already covered the
+     * batch. Strings, not Dates, on purpose: a day is a calendar bucket, and a Date would be
+     * re-bucketed through the SERVER's timezone on the timestamptz→date cast (this DB runs
+     * TZ=Asia/Ho_Chi_Minh) — the string casts to ::date verbatim, and compares against the
+     * cookie value by plain equality.
+     */
     days: string[]
   }): Promise<void> {
     const params: unknown[] = []
