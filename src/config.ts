@@ -15,6 +15,8 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): AppConfig {
     port,
     // The ymusic_server DSN; the cert files are this app server's identity against the DB's
     // private CA (see ymusic-docker-configs/tls). No DSN = pulse ingest off, log-only.
+    // No YM_PG_CA = plaintext connection, for a server on the SAME host as the DB (skips the
+    // TLS handshake cost) — the DB's pg_hba must have its private-subnet `host` line opened.
     pg: env.YM_PG
       ? {
           dsn: env.YM_PG,
