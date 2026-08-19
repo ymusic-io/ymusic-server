@@ -35,12 +35,19 @@ export default async function pulseRoutes(app: FastifyInstance): Promise<void> {
     for (const item of raw) {
       const name = typeof (item as { name?: unknown })?.name === 'string' ? (item as { name: string }).name : ''
       const at = (item as { at?: unknown })?.at
-      if (!EVENTS[name] || typeof at !== 'number' || !Number.isFinite(at) || at < now - MAX_EVENT_AGE_MS) {
+      const def = EVENTS[name]
+      if (!def || typeof at !== 'number' || !Number.isFinite(at) || at < now - MAX_EVENT_AGE_MS) {
+        dropped++
+        continue
+      }
+      // The event's own handler turns the wire props into its columns; null = malformed.
+      const values = def.values(stringProps((item as { props?: unknown }).props))
+      if (values === null) {
         dropped++
         continue
       }
       const clamped = new Date(Math.min(at, now)) // a future clock credits today, not tomorrow
-      accepted.push({ name, at: clamped })
+      accepted.push({ name, at: clamped, values })
       days.add(clamped.toISOString().slice(0, 10))
     }
 
@@ -77,6 +84,16 @@ export default async function pulseRoutes(app: FastifyInstance): Promise<void> {
     setActivityCookie(reply, allDays.at(-1)!)
     return reply.code(204).send()
   })
+}
+
+/** The wire props are a map of strings; anything else in there is ignored, not an error. */
+function stringProps(raw: unknown): Record<string, string> {
+  if (typeof raw !== 'object' || raw === null || Array.isArray(raw)) return {}
+  const props: Record<string, string> = {}
+  for (const [key, value] of Object.entries(raw)) {
+    if (typeof value === 'string') props[key] = value
+  }
+  return props
 }
 
 function readActivityCookie(req: FastifyRequest): string | undefined {

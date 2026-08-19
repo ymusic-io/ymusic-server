@@ -43,6 +43,7 @@ describe.runIf(!!DSN)('POST /v1/pulse against live postgres', () => {
 
   afterAll(async () => {
     await db.query('DELETE FROM event_app_start WHERE device_id = $1', [device])
+    await db.query('DELETE FROM event_app_update WHERE device_id = $1', [device])
     await db.query('DELETE FROM daily_activity WHERE device_id = $1', [device])
     await db.query('DELETE FROM devices WHERE id = $1', [device])
     await db.end()
@@ -94,6 +95,20 @@ describe.runIf(!!DSN)('POST /v1/pulse against live postgres', () => {
     expect(after.rows[0].updated_at).toEqual(before.rows[0].updated_at) // upsert skipped
     const events = await db.query('SELECT count(*)::int AS n FROM event_app_start WHERE device_id = $1', [device])
     expect(events.rows[0].n).toBeGreaterThanOrEqual(3) // events always land
+  })
+
+  it('an event handler turns props into typed columns, and rejects malformed ones', async () => {
+    const res = await post([
+      { name: 'app_update', at: Date.now(), props: { fromVersion: '1233', toVersion: '1234' } },
+      { name: 'app_update', at: Date.now(), props: { fromVersion: 'not-a-number' } }, // handler drops
+    ])
+
+    expect(res.statusCode).toBe(204)
+    const rows = await db.query(
+      'SELECT from_version, to_version FROM event_app_update WHERE device_id = $1',
+      [device],
+    )
+    expect(rows.rows).toEqual([{ from_version: 1233, to_version: 1234 }])
   })
 
   it('a tampered cookie falls back to the normal write path', async () => {

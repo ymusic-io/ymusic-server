@@ -2,12 +2,35 @@ import { readFileSync } from 'node:fs'
 import pg from 'pg'
 
 /**
- * The event allowlist — the ONLY door to a table. Adding an event is one entry here plus its
- * CREATE TABLE in [MIGRATION] (and the client recording it); an unknown name from the wire is
- * dropped at the route, never stored, never DDL'd.
+ * The event allowlist and per-event handlers — the ONLY door to a table. An entry says which
+ * table an event lands in, which columns it has beyond (device_id, at), and how to turn the
+ * wire props into those columns' values; `null` rejects the event. Adding an event is one entry
+ * here plus its CREATE TABLE in [MIGRATION] (and the client recording it); an unknown name from
+ * the wire is dropped at the route, never stored, never DDL'd.
  */
-export const EVENTS: Record<string, { table: string }> = {
-  app_start: { table: 'event_app_start' },
+export interface EventDef {
+  table: string
+  /** Columns beyond (device_id, at), filled by [values] in the same order. */
+  columns: readonly string[]
+  /** Parse the wire props into column values; null = malformed, drop the event. */
+  values(props: Record<string, string>): unknown[] | null
+}
+
+export const EVENTS: Record<string, EventDef> = {
+  app_start: {
+    table: 'event_app_start',
+    columns: [],
+    values: () => [],
+  },
+  app_update: {
+    table: 'event_app_update',
+    columns: ['from_version', 'to_version'],
+    values: (props) => {
+      const from = Number.parseInt(props.fromVersion ?? '', 10)
+      const to = Number.parseInt(props.toVersion ?? '', 10)
+      return Number.isInteger(from) && Number.isInteger(to) ? [from, to] : null
+    },
+  },
 }
 
 /**
@@ -35,6 +58,14 @@ CREATE TABLE IF NOT EXISTS event_app_start (
   received_at timestamptz NOT NULL DEFAULT now()
 );
 CREATE INDEX IF NOT EXISTS event_app_start_at ON event_app_start (at);
+CREATE TABLE IF NOT EXISTS event_app_update (
+  device_id    uuid NOT NULL,
+  at           timestamptz NOT NULL,
+  received_at  timestamptz NOT NULL DEFAULT now(),
+  from_version integer NOT NULL,
+  to_version   integer NOT NULL
+);
+CREATE INDEX IF NOT EXISTS event_app_update_at ON event_app_update (at);
 `
 
 /** [dsn] should be the ymusic_server role; the cert files come from the private DB CA. */
@@ -48,6 +79,8 @@ export interface PgSettings {
 export interface AcceptedEvent {
   name: string
   at: Date
+  /** What the event's [EventDef.values] handler extracted, in [EventDef.columns] order. */
+  values: unknown[]
 }
 
 export class Analytics {
@@ -71,9 +104,11 @@ export class Analytics {
   }
 
   /**
-   * One batch, one transaction: the device upsert and day credits ([days] is empty when the
-   * activity cookie already covered the batch), then the allowlisted events into their tables.
-   * Throws on any failure — the route answers 500 and the client's disk queue retries.
+   * The whole batch as ONE statement — data-modifying CTEs chain the device upsert, the day
+   * credits and every event insert into a single round trip, which is what matters when the
+   * leaf server is far from this database. A single statement is also implicitly atomic, so
+   * there is no BEGIN/COMMIT and no client checkout to manage. Throws on failure — the route
+   * answers 500 and the client's disk queue retries.
    */
   async ingest(input: {
     deviceId: string
@@ -81,56 +116,55 @@ export class Analytics {
     appVersion: number
     country: string | null
     events: AcceptedEvent[]
+    /** UTC days to credit; empty when the activity cookie already covered the batch. */
     days: string[]
   }): Promise<void> {
-    const client = await this.pool.connect()
-    try {
-      await client.query('BEGIN')
-      if (input.days.length > 0) {
-        await client.query(
-          `INSERT INTO devices (id, os, app_version, country, created_at, updated_at)
-           VALUES ($1, $2, $3, $4, now(), now())
+    const params: unknown[] = []
+    const bind = (value: unknown): string => {
+      params.push(value)
+      return `$${params.length}`
+    }
+
+    const ctes: string[] = []
+    if (input.days.length > 0) {
+      ctes.push(
+        `dev AS (
+           INSERT INTO devices (id, os, app_version, country, created_at, updated_at)
+           VALUES (${bind(input.deviceId)}, ${bind(input.os)}, ${bind(input.appVersion)}, ${bind(input.country)}, now(), now())
            ON CONFLICT (id) DO UPDATE SET
              os = EXCLUDED.os,
              app_version = EXCLUDED.app_version,
              country = COALESCE(EXCLUDED.country, devices.country),
-             updated_at = now()`,
-          [input.deviceId, input.os, input.appVersion, input.country],
-        )
-        await client.query(
-          `INSERT INTO daily_activity (day, device_id)
-           SELECT unnest($1::date[]), $2 ON CONFLICT DO NOTHING`,
-          [input.days, input.deviceId],
-        )
-      }
-      const byTable = new Map<string, Date[]>()
-      for (const event of input.events) {
-        const table = EVENTS[event.name]?.table
-        if (!table) continue // the route filtered already; never trust that from here
-        const ats = byTable.get(table)
-        if (ats) ats.push(event.at)
-        else byTable.set(table, [event.at])
-      }
-      for (const [table, ats] of byTable) {
-        // Table names come from OUR registry above, never from the wire — safe to splice.
-        await client.query(
-          `INSERT INTO ${table} (device_id, at) SELECT $1, unnest($2::timestamptz[])`,
-          [input.deviceId, ats],
-        )
-      }
-      await client.query('COMMIT')
-    } catch (error) {
-      // A failed ROLLBACK means the CONNECTION is broken, not just the transaction: destroy
-      // it (release(true)) rather than hand a dead socket back to the pool.
-      try {
-        await client.query('ROLLBACK')
-        client.release()
-      } catch {
-        client.release(true)
-      }
-      throw error
+             updated_at = now())`,
+      )
+      ctes.push(
+        `act AS (
+           INSERT INTO daily_activity (day, device_id)
+           SELECT unnest(${bind(input.days)}::date[]), ${bind(input.deviceId)}
+           ON CONFLICT DO NOTHING)`,
+      )
     }
-    client.release()
+
+    const byTable = new Map<string, { def: EventDef; rows: AcceptedEvent[] }>()
+    for (const event of input.events) {
+      const def = EVENTS[event.name]
+      if (!def) continue // the route filtered already; never trust that from here
+      const group = byTable.get(def.table)
+      if (group) group.rows.push(event)
+      else byTable.set(def.table, { def, rows: [event] })
+    }
+    let n = 0
+    for (const [table, { def, rows }] of byTable) {
+      // Table and column names come from OUR registry above, never from the wire.
+      const columns = ['device_id', 'at', ...def.columns].join(', ')
+      const tuples = rows
+        .map((row) => `(${[bind(input.deviceId), bind(row.at), ...row.values.map(bind)].join(', ')})`)
+        .join(', ')
+      ctes.push(`e${n++} AS (INSERT INTO ${table} (${columns}) VALUES ${tuples})`)
+    }
+
+    if (ctes.length === 0) return
+    await this.pool.query(`WITH ${ctes.join(',\n')} SELECT 1`, params)
   }
 
   async close(): Promise<void> {
