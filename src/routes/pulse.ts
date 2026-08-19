@@ -104,9 +104,12 @@ export default async function pulseRoutes(app: FastifyInstance): Promise<void> {
       req.log.error({ err: error }, 'pulse ingest failed — client will retry from its queue')
       return reply.code(500).send()
     }
-    // The watermark only moves forward: a batch of old events must not rewind it.
+    // The watermark only moves forward, and is only re-sent when it MOVED — an unchanged value
+    // is a wasted Set-Cookie. (Max-Age then refreshes on change, not per request: fine, since
+    // an active device moves it daily and the cookie lives two.)
     const lastDay = batchDays.at(-1)!
-    setActivityCookie(reply, cookieDay !== undefined && cookieDay > lastDay ? cookieDay : lastDay)
+    const watermark = cookieDay !== undefined && cookieDay > lastDay ? cookieDay : lastDay
+    if (watermark !== cookieDay) setActivityCookie(reply, watermark)
     return reply.code(204).send()
   })
 }

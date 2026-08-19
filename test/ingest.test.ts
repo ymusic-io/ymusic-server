@@ -108,8 +108,8 @@ describe.runIf(!!DSN)('POST /v1/pulse against live postgres', () => {
     expect(res.statusCode).toBe(204)
     const after = await db.query('SELECT count(*)::int AS n FROM daily_activity WHERE device_id = $1', [device])
     expect(after.rows[0].n).toBe(before.rows[0].n)
-    // And the watermark did not rewind to yesterday.
-    expect((res.headers['set-cookie'] as string).split(';')[0]).toBe(cookie)
+    // The watermark did not move, so it is not re-sent either.
+    expect(res.headers['set-cookie']).toBeUndefined()
   })
 
   it('an event handler turns props into typed columns, and rejects malformed ones', async () => {
