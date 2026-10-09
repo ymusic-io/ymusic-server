@@ -1,12 +1,15 @@
 import fastifyCookie from '@fastify/cookie'
 import Fastify, { type FastifyInstance } from 'fastify'
-import { Analytics, type PgSettings } from './db.js'
+import { Analytics, openPool, type PgSettings } from './db.js'
+import { type LinkStore, PgLinkStore } from './links.js'
 import { routes } from './routes/index.js'
 
 declare module 'fastify' {
   interface FastifyInstance {
     /** Null without a configured database: pulse stays log-only, everything else unaffected. */
     analytics: Analytics | null
+    /** The QR sign-in relay; null without a database. */
+    links: LinkStore | null
   }
 }
 
@@ -15,6 +18,8 @@ export interface ServerOptions {
   pg?: PgSettings | undefined
   /** HMAC secret for signed cookies (YM_COOKIE_SECRET). Absent = no cookies, ever. */
   cookieSecret?: string | undefined
+  /** Overrides the database-backed relay — tests pass a MemoryLinkStore. */
+  links?: LinkStore | undefined
 }
 
 export async function buildServer(options: ServerOptions = {}): Promise<FastifyInstance> {
@@ -26,9 +31,11 @@ export async function buildServer(options: ServerOptions = {}): Promise<FastifyI
 
   if (options.cookieSecret) await app.register(fastifyCookie, { secret: options.cookieSecret })
 
-  app.decorate('analytics', options.pg ? await Analytics.open(options.pg) : null)
+  const pool = options.pg ? await openPool(options.pg) : null
+  app.decorate('analytics', pool ? new Analytics(pool) : null)
+  app.decorate('links', options.links ?? (pool ? new PgLinkStore(pool) : null))
   app.addHook('onClose', async () => {
-    await app.analytics?.close()
+    await pool?.end()
   })
 
   for (const route of routes) await app.register(route)

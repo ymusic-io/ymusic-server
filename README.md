@@ -66,11 +66,28 @@ Upload the installer to that url, then paste the printed entry into its platform
 `RELEASES` in [`src/routes/config.ts`](src/routes/config.ts). The signature covers
 `app-<platform>:<versionCode>:<sha256 of the installer>`.
 
+## QR sign-in relay
+
+The desktop signs in by showing a QR; the phone that scans it sends its YouTube session through
+`/v1/link`, a one-shot slot in the `device_links` table:
+
+```
+POST   /v1/link       → 201 {id, expiresInMs}    desktop opens a slot (10 minutes)
+PUT    /v1/link/:id   → 204 | 404                phone fills it once (base64url text, ≤64KB)
+GET    /v1/link/:id   → 200 payload | 204 | 404  desktop polls; the 200 deletes the row
+DELETE /v1/link/:id   → 204                      desktop gives up
+```
+
+The payload is encrypted with a key that travels only inside the QR, so the database holds
+ciphertext this server cannot read. Expired rows are swept whenever a slot is opened. Without a
+database these routes answer 503.
+
 ## Layout
 
 ```
 src/routes/config.ts    GET /v1/config — the rules and the handler
 src/routes/health.ts    GET /healthz
+src/routes/link.ts      the QR sign-in relay (store: src/links.ts)
 src/routes/index.ts     the list every route is registered from
 src/server.ts           builds the fastify instance
 src/index.ts            reads env, listens

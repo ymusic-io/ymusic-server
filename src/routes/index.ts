@@ -1,6 +1,7 @@
 import type { FastifyPluginAsync } from 'fastify'
 import configRoutes from './config.js'
 import healthRoutes from './health.js'
+import linkRoutes from './link.js'
 import pulseRoutes from './pulse.js'
 
 /**
@@ -10,4 +11,4 @@ import pulseRoutes from './pulse.js'
  * @fastify/autoload, and an explicit list means the compiler sees a missing or misnamed module
  * instead of the server simply starting up without that route.
  */
-export const routes: FastifyPluginAsync[] = [healthRoutes, configRoutes, pulseRoutes]
+export const routes: FastifyPluginAsync[] = [healthRoutes, configRoutes, pulseRoutes, linkRoutes]

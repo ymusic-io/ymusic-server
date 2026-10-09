@@ -78,6 +78,12 @@ CREATE TABLE IF NOT EXISTS event_app_update (
 CREATE INDEX IF NOT EXISTS event_app_update_at ON event_app_update (at);
 -- Columns added after a table already shipped: IF NOT EXISTS on both sides keeps this
 -- migration a pure statement of the current shape.
+CREATE TABLE IF NOT EXISTS device_links (
+  id         text PRIMARY KEY,
+  payload    text,
+  expires_at timestamptz NOT NULL
+);
+CREATE INDEX IF NOT EXISTS device_links_expires_at ON device_links (expires_at);
 ALTER TABLE devices ADD COLUMN IF NOT EXISTS os_version text;
 ALTER TABLE event_app_update ADD COLUMN IF NOT EXISTS os text;
 `
@@ -97,25 +103,26 @@ export interface AcceptedEvent {
   values: unknown[]
 }
 
-export class Analytics {
-  private constructor(private readonly pool: pg.Pool) {}
+/** The one pool every store shares, migrated before anything uses it. */
+export async function openPool(settings: PgSettings): Promise<pg.Pool> {
+  const pool = new pg.Pool({
+    connectionString: settings.dsn,
+    ssl: settings.caFile
+      ? {
+          ca: readFileSync(settings.caFile, 'utf8'),
+          cert: settings.certFile ? readFileSync(settings.certFile, 'utf8') : undefined,
+          key: settings.keyFile ? readFileSync(settings.keyFile, 'utf8') : undefined,
+        }
+      : undefined,
+    options: '-c search_path=app',
+    max: 5,
+  })
+  await pool.query(MIGRATION)
+  return pool
+}
 
-  static async open(settings: PgSettings): Promise<Analytics> {
-    const pool = new pg.Pool({
-      connectionString: settings.dsn,
-      ssl: settings.caFile
-        ? {
-            ca: readFileSync(settings.caFile, 'utf8'),
-            cert: settings.certFile ? readFileSync(settings.certFile, 'utf8') : undefined,
-            key: settings.keyFile ? readFileSync(settings.keyFile, 'utf8') : undefined,
-          }
-        : undefined,
-      options: '-c search_path=app',
-      max: 5,
-    })
-    await pool.query(MIGRATION)
-    return new Analytics(pool)
-  }
+export class Analytics {
+  constructor(private readonly pool: pg.Pool) {}
 
   /**
    * The whole batch as ONE statement — data-modifying CTEs chain the device upsert, the day
@@ -187,9 +194,5 @@ export class Analytics {
 
     if (ctes.length === 0) return
     await this.pool.query(`WITH ${ctes.join(',\n')} SELECT 1`, params)
-  }
-
-  async close(): Promise<void> {
-    await this.pool.end()
   }
 }
