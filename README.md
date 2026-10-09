@@ -17,16 +17,33 @@ GET /healthz
     "size": "0",
     "checksum": ""
   },
-  "wvJs": { "version": 123, "url": "https://cfg.ymusic.io/static/webview_ymusic-123.js" },
-  "engineJs": { "version": 11, "url": "https://cfg.ymusic.io/static/engine_ymusic-11.js" }
+  "engineJs": { "version": 69, "url": "https://cfg.ymusic.io/static/engine-69.js", "signature": "MEYCIQ…" },
+  "playerJs": null
 }
 ```
 
 `newVersion` is `null` when the caller is already current, or when its platform has no release.
 
-`wvJs` and `engineJs` are always the latest; the client compares each `version` against the bundle it
-already has. Neither is per-platform — the webview script runs in the WebView and the engine in
-QuickJS, on every platform — so bumping one ships a scraping fix without an app release.
+`engineJs` and `playerJs` are the latest published bundles, or `null` while none is. The client
+compares each `version` against the bundle it already has: engine.js goes live at once, player.js at
+the next player session. Neither is per-platform — both run in QuickJS everywhere — so bumping one
+ships a fix without an app release.
+
+## Publishing a JS bundle
+
+Every bundle entry is signed, and the app refuses a file whose bytes do not match its signature —
+on download and again each time it loads the cached copy. Sign on your own machine; the private
+key never goes to this server:
+
+```bash
+YM_BUNDLE_SIGNING_KEY=<base64 PKCS#8 P-256 key> \
+  node scripts/sign-bundle.mjs engine 69 path/to/engine.js https://cfg.ymusic.io/static/engine-69.js
+```
+
+Upload the file to that url, then paste the printed `{version, url, signature}` into `ENGINE_JS` /
+`PLAYER_JS` in [`src/routes/config.ts`](src/routes/config.ts). The signature covers
+`<name>:<version>:<sha256 of the file>`, so a file cannot be re-published under another version or
+as the other bundle without signing it again.
 
 ## Layout
 
