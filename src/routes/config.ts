@@ -32,12 +32,24 @@ const RELEASES: Record<string, { belowVersionCode: number; newVersion: NewVersio
 }
 
 /**
- * The newest JS bundles. Not per-platform: both run everywhere, the webview script in the WebView and
- * the engine in QuickJS. The client compares the version against the one it already has, so bumping
- * these is what ships a scraping fix without a release.
+ * A published JS bundle. `signature` authenticates the file at `url` for `version`: ECDSA P-256 over
+ * `<name>:<version>:<sha256 hex of the file>`, made OFFLINE with `scripts/sign-bundle.mjs` — the
+ * signing key never reaches this server. The app refuses any bundle whose bytes do not match.
  */
-const WV_JS = { version: 123, url: 'https://cfg.ymusic.io/static/webview_ymusic-123.js' }
-const ENGINE_JS = { version: 11, url: 'https://cfg.ymusic.io/static/engine_ymusic-11.js' }
+export interface SignedBundle {
+  version: number
+  url: string
+  signature: string
+}
+
+/**
+ * The newest JS bundles, or null while none is published. Not per-platform: both run in QuickJS
+ * everywhere. The client compares the version against the one it already has, so bumping these is
+ * what ships a fix without a release: engine.js goes live at once, player.js at the next player
+ * session. Paste `scripts/sign-bundle.mjs` output here.
+ */
+const ENGINE_JS: SignedBundle | null = null
+const PLAYER_JS: SignedBundle | null = null
 
 /**
  * What the app asks for at startup: feature flags, the newest JS bundles, and whether a newer build
@@ -61,8 +73,8 @@ export default async function configRoutes(app: FastifyInstance): Promise<void> 
       variableA: 123,
       featureX: os === 'windows',
       newVersion: release && appVer < release.belowVersionCode ? release.newVersion : null,
-      wvJs: WV_JS,
       engineJs: ENGINE_JS,
+      playerJs: PLAYER_JS,
     }
   })
 }

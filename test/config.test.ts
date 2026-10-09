@@ -5,8 +5,8 @@ let app: Awaited<ReturnType<typeof buildServer>>
 
 /** Shared by the whole-body assertions, which would otherwise restate the bundles twice. */
 const BUNDLES = {
-  wvJs: { version: expect.any(Number), url: expect.any(String) },
-  engineJs: { version: expect.any(Number), url: expect.any(String) },
+  engineJs: null,
+  playerJs: null,
 }
 
 /** The common context — os, appVer, device uuid — rides as headers on every API call. */
@@ -91,18 +91,14 @@ describe('GET /v1/config', () => {
     expect(res.headers['etag']).toBeUndefined()
   })
 
-  it('publishes the latest JS bundle versions, regardless of platform', async () => {
+  it('publishes the same JS bundles regardless of platform', async () => {
     const windows = (await get('windows', '1234')).json()
     const android = (await get('android', '1234')).json()
 
-    // The client compares these against what it has, so a version has to be a number to compare.
-    expect(typeof windows.wvJs.version).toBe('number')
-    expect(typeof windows.engineJs.version).toBe('number')
-    expect(windows.wvJs.url).toMatch(/^https:/)
-    expect(windows.engineJs.url).toMatch(/^https:/)
     // Both bundles run everywhere; a per-platform answer here would be a bug, not a feature.
-    expect(android.wvJs).toEqual(windows.wvJs)
     expect(android.engineJs).toEqual(windows.engineJs)
+    expect(android.playerJs).toEqual(windows.playerJs)
+    expect(windows).not.toHaveProperty('wvJs')
   })
 
   it('serves nothing else', async () => {
