@@ -3,7 +3,7 @@
 Fastify server with one endpoint: the config YMusic asks for at startup.
 
 ```
-GET /v1/config?os=windows&appVer=1233&deviceId=abc
+GET /v1/config      x-os: windows, x-arch: x64, x-app-ver: 1233, x-device-id: …
 GET /healthz
 ```
 
@@ -11,18 +11,23 @@ GET /healthz
 {
   "variableA": 123,
   "featureX": true,
-  "newVersion": {
-    "url": "https://cfg.ymusic.io/static/ymusic-1234-windows-x64.exe",
-    "changelog": "https://cfg.ymusic.io/static/changelog-1234.md",
-    "size": "0",
-    "checksum": ""
+  "appUpdate": {
+    "versionCode": 1234,
+    "versionName": "4.1.0",
+    "notes": "What changed",
+    "url": "https://cfg.ymusic.io/static/YMusic-4.1.0.msi",
+    "size": 98765432,
+    "sha256": "9f2c…",
+    "signature": "MEUCIQ…"
   },
   "engineJs": { "version": 69, "url": "https://cfg.ymusic.io/static/engine-69.js", "signature": "MEYCIQ…" },
   "playerJs": null
 }
 ```
 
-`newVersion` is `null` when the caller is already current, or when its platform has no release.
+`appUpdate` is `null` when the caller is already current, or when its platform has no release.
+Desktop platforms are keyed by OS and arch (`macos-arm64`, `windows-x64`, …); Android's APK is one
+universal build.
 
 `engineJs` and `playerJs` are the latest published bundles, or `null` while none is. The client
 compares each `version` against the bundle it already has: engine.js goes live at once, player.js at
@@ -45,6 +50,22 @@ Upload the file to that url, then paste the printed `{version, url, signature}` 
 `<name>:<version>:<sha256 of the file>`, so a file cannot be re-published under another version or
 as the other bundle without signing it again.
 
+## Publishing an app release
+
+Each `appUpdate` is the whole installer — an APK, DMG, MSI or DEB — signed with the UPDATE key (a
+different key from the bundle one). Desktop installs nothing whose signature does not match; Android
+relies on the OS, which only installs an APK signed with the installed app's certificate.
+
+```bash
+YM_UPDATE_SIGNING_KEY=<base64 PKCS#8 P-256 key> \
+  node scripts/sign-app-update.mjs windows-x64 1234 4.1.0 YMusic-4.1.0.msi \
+    https://cfg.ymusic.io/static/YMusic-4.1.0.msi notes.txt
+```
+
+Upload the installer to that url, then paste the printed entry into its platform's slot in
+`RELEASES` in [`src/routes/config.ts`](src/routes/config.ts). The signature covers
+`app-<platform>:<versionCode>:<sha256 of the installer>`.
+
 ## Layout
 
 ```
@@ -63,12 +84,12 @@ quietly without that route.
 ## Editing the rules
 
 They are in [`src/routes/config.ts`](src/routes/config.ts), beside the handler that serves them —
-`resolveConfig` is a plain function, so they test without HTTP. A release is three lines in the
-`RELEASES` table: the newest build per platform and the version below which it is offered.
+A release is one entry in the `RELEASES` table, offered to every build of that platform below its
+`versionCode`.
 
-`os` is a coarse platform name (`windows`, `android`, …), matched lower-case. `appVer` is the caller's
-build number; a missing or unparseable one falls back to `-1`, which is older than every release, so
-such a caller is offered the update rather than quietly left behind. `deviceId` is accepted for
+`x-os` is a coarse platform name (`windows`, `android`, …) and `x-arch` the desktop CPU (`x64`,
+`arm64`), both matched lower-case. `x-app-ver` is the caller's build number; a missing or unparseable one falls back to `-1`, which is older than every release, so
+such a caller is offered the update rather than quietly left behind. `x-device-id` is accepted for
 staged rollouts but no rule reads it yet.
 
 ## Caching and static files
@@ -88,10 +109,3 @@ npm test
 
 `PORT` (8787), `HOST` (0.0.0.0), `LOG_LEVEL` (info). `trustProxy` is on, so terminate TLS at the
 proxy.
-
-## One thing to know about `newVersion`
-
-The response is unsigned, and `checksum` arrives beside the `url` it describes — so it catches a
-corrupted download, not a substituted one. Whatever consumes `newVersion` should verify the
-downloaded artifact against a key pinned in the app; otherwise this endpoint is a place where
-anything that can answer for it can choose what code the app installs.

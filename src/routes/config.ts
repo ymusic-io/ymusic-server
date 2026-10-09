@@ -1,34 +1,37 @@
 import type { FastifyInstance } from 'fastify'
 import { header } from '../headers.js'
 
-/** An available build. [checksum] is sha256 of the bytes at [url]. */
-export interface NewVersion {
+/**
+ * A published app build. `sha256` is of the installer at `url` (APK, DMG, MSI or DEB); `signature`
+ * is ECDSA P-256 over `app-<platform>:<versionCode>:<sha256>`, made OFFLINE with
+ * `scripts/sign-app-update.mjs` — the desktop app installs nothing without it. Offered to builds
+ * whose x-app-ver is below `versionCode`.
+ */
+export interface AppRelease {
+  versionCode: number
+  versionName: string
+  notes: string
   url: string
-  changelog: string
-  size: string
-  checksum: string
+  size: number
+  sha256: string
+  signature: string
 }
 
-/** The newest build per platform, and the version below which it is offered. */
-const RELEASES: Record<string, { belowVersionCode: number; newVersion: NewVersion }> = {
-  windows: {
-    belowVersionCode: 1234,
-    newVersion: {
-      url: 'https://cfg.ymusic.io/static/ymusic-1234-windows-x64.exe',
-      changelog: 'https://cfg.ymusic.io/static/changelog-1234.md',
-      size: '0',
-      checksum: '',
-    },
-  },
-  android: {
-    belowVersionCode: 1234,
-    newVersion: {
-      url: 'https://cfg.ymusic.io/static/ymusic-1234.apk',
-      changelog: 'https://cfg.ymusic.io/static/changelog-1234.md',
-      size: '0',
-      checksum: '',
-    },
-  },
+/**
+ * The newest build per platform, null while none is published. Desktop keys carry the arch
+ * (x-arch); Android's APK is universal. Paste `scripts/sign-app-update.mjs` output here.
+ */
+export const RELEASES: Record<string, AppRelease | null> = {
+  android: null,
+  'macos-arm64': null,
+  'macos-x64': null,
+  'windows-x64': null,
+  'linux-x64': null,
+}
+
+/** `android`, or `<os>-<arch>` for desktop. */
+function platformOf(os: string, arch: string): string {
+  return os === 'android' || arch === '' ? os : `${os}-${arch}`
 }
 
 /**
@@ -60,19 +63,20 @@ const PLAYER_JS: SignedBundle | null = null
  */
 export default async function configRoutes(app: FastifyInstance): Promise<void> {
   app.get('/v1/config', (req) => {
-    // The common context — os, appVer, device uuid — rides as headers on every API call; this
-    // route only reads the first two. Fastify lowercases header names.
+    // The common context — os, arch, appVer, device uuid — rides as headers on every API call;
+    // this route reads all but the uuid. Fastify lowercases header names.
     const os = (header(req.headers['x-os']) ?? '').toLowerCase()
     // || not ??: parseInt returns NaN, which is nullish to nobody, and NaN < anything is false — so
     // a junk appVer would silently mean "up to date" rather than falling back to -1.
     const appVer = Number.parseInt(header(req.headers['x-app-ver']) ?? '', 10) || -1
 
-    const release = RELEASES[os]
+    const arch = (header(req.headers['x-arch']) ?? '').toLowerCase()
+    const release = RELEASES[platformOf(os, arch)] ?? null
 
     return {
       variableA: 123,
       featureX: os === 'windows',
-      newVersion: release && appVer < release.belowVersionCode ? release.newVersion : null,
+      appUpdate: release && appVer < release.versionCode ? release : null,
       engineJs: ENGINE_JS,
       playerJs: PLAYER_JS,
     }

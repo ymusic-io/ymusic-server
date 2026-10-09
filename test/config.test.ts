@@ -1,4 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
+import { RELEASES, type AppRelease } from '../src/routes/config.js'
 import { buildServer } from '../src/server.js'
 
 let app: Awaited<ReturnType<typeof buildServer>>
@@ -9,55 +10,71 @@ const BUNDLES = {
   playerJs: null,
 }
 
-/** The common context — os, appVer, device uuid — rides as headers on every API call. */
-function get(os?: string, appVer?: string, deviceId = 'abc') {
+function release(versionCode: number, url: string): AppRelease {
+  return { versionCode, versionName: '4.1.0', notes: 'n', url, size: 12, sha256: 'ab', signature: 'sig' }
+}
+
+/** The common context — os, arch, appVer, device uuid — rides as headers on every API call. */
+function get(os?: string, appVer?: string, arch?: string, deviceId = 'abc') {
   const headers: Record<string, string> = { 'x-device-id': deviceId }
   if (os !== undefined) headers['x-os'] = os
+  if (arch !== undefined) headers['x-arch'] = arch
   if (appVer !== undefined) headers['x-app-ver'] = appVer
   return app.inject({ url: '/v1/config', headers })
 }
 
+const published = { ...RELEASES }
+
 beforeEach(async () => {
+  RELEASES['windows-x64'] = release(1234, 'https://x/ymusic-1234.msi')
+  RELEASES['macos-arm64'] = release(1234, 'https://x/ymusic-1234-arm64.dmg')
+  RELEASES.android = release(1234, 'https://x/ymusic-1234.apk')
   app = await buildServer()
   await app.ready()
 })
 
 afterEach(async () => {
+  Object.assign(RELEASES, published)
   await app.close()
 })
 
 describe('GET /v1/config', () => {
   it('answers the flags and no update for a current build', async () => {
-    const res = await get('windows', '1234')
+    const res = await get('windows', '1234', 'x64')
 
     expect(res.statusCode).toBe(200)
-    expect(res.json()).toEqual({ variableA: 123, featureX: true, newVersion: null, ...BUNDLES })
+    expect(res.json()).toEqual({ variableA: 123, featureX: true, appUpdate: null, ...BUNDLES })
   })
 
   it('offers the update to an older build', async () => {
-    const res = await get('windows', '1233')
+    const res = await get('windows', '1233', 'x64')
 
-    expect(res.json().newVersion).toEqual({
-      url: expect.stringContaining('windows'),
-      changelog: expect.any(String),
-      size: expect.any(String),
-      checksum: expect.any(String),
-    })
+    expect(res.json().appUpdate).toEqual(release(1234, 'https://x/ymusic-1234.msi'))
   })
 
   it('keys the update off the platform, so android and windows are independent', async () => {
     const android = await get('android', '1')
-    const windows = await get('windows', '1')
+    const windows = await get('windows', '1', 'x64')
 
-    expect(android.json().newVersion.url).toContain('.apk')
-    expect(windows.json().newVersion.url).toContain('windows')
+    expect(android.json().appUpdate.url).toContain('.apk')
+    expect(windows.json().appUpdate.url).toContain('.msi')
+  })
+
+  it('picks the desktop build by arch, and offers none without one', async () => {
+    expect((await get('macos', '1', 'arm64')).json().appUpdate.url).toContain('arm64')
+    expect((await get('macos', '1', 'x64')).json().appUpdate).toBeNull()
+    expect((await get('macos', '1')).json().appUpdate).toBeNull()
+  })
+
+  it('ignores arch for android', async () => {
+    expect((await get('android', '1', 'arm64')).json().appUpdate.url).toContain('.apk')
   })
 
   it('offers nothing to a platform with no release', async () => {
     const res = await get('solaris', '1')
 
     expect(res.statusCode).toBe(200)
-    expect(res.json().newVersion).toBeNull()
+    expect(res.json().appUpdate).toBeNull()
   })
 
   it('is case-insensitive about os', async () => {
@@ -66,7 +83,7 @@ describe('GET /v1/config', () => {
 
   it('treats a missing or junk appVer as -1, so such a caller is offered the update', async () => {
     for (const appVer of [undefined, 'nonsense']) {
-      expect((await get('windows', appVer)).json().newVersion, String(appVer)).not.toBeNull()
+      expect((await get('windows', appVer, 'x64')).json().appUpdate, String(appVer)).not.toBeNull()
     }
   })
 
@@ -74,14 +91,14 @@ describe('GET /v1/config', () => {
     const res = await app.inject('/v1/config?os=windows&appVer=1&deviceId=abc')
 
     expect(res.statusCode).toBe(200)
-    expect(res.json()).toEqual({ variableA: 123, featureX: false, newVersion: null, ...BUNDLES })
+    expect(res.json()).toEqual({ variableA: 123, featureX: false, appUpdate: null, ...BUNDLES })
   })
 
   it('answers a request with no headers and no query at all', async () => {
     const res = await app.inject('/v1/config')
 
     expect(res.statusCode).toBe(200)
-    expect(res.json()).toEqual({ variableA: 123, featureX: false, newVersion: null, ...BUNDLES })
+    expect(res.json()).toEqual({ variableA: 123, featureX: false, appUpdate: null, ...BUNDLES })
   })
 
   it('sets no cache-control, leaving caching to the reverse proxy', async () => {
