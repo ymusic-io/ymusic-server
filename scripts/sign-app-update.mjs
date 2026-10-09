@@ -4,7 +4,7 @@
 //   YM_UPDATE_SIGNING_KEY=<base64 PKCS#8 P-256 key> \
 //     node scripts/sign-app-update.mjs <platform> <versionCode> <versionName> <installer> <public url> [notes file]
 //
-// <platform> is a RELEASES key: android, macos-arm64, macos-x64, windows-x64, linux-x64.
+// <platform> is a RELEASES key: android (universal), android-<abi>, macos-arm64, macos-x64, windows-x64, linux-x64.
 // Prints the entry for src/routes/config.ts. The signature is ECDSA P-256 / SHA-256 (DER, base64)
 // over "app-<platform>:<versionCode>:<sha256 hex of the installer>" — what the desktop app rebuilds
 // from the bytes it downloads. This key is the UPDATE key, not the JS bundle key.
@@ -12,7 +12,7 @@
 import { createHash, createPrivateKey, createPublicKey, sign, verify } from 'node:crypto'
 import { createReadStream, readFileSync, statSync } from 'node:fs'
 
-const PLATFORMS = ['android', 'macos-arm64', 'macos-x64', 'windows-x64', 'linux-x64']
+const PLATFORMS = ['android', 'android-arm64-v8a', 'android-x86_64', 'macos-arm64', 'macos-x64', 'windows-x64', 'linux-x64']
 
 const [platform, versionCodeArg, versionName, file, url, notesFile] = process.argv.slice(2)
 if (!PLATFORMS.includes(platform) || !versionCodeArg || !versionName || !file || !url) {

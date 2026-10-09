@@ -66,8 +66,11 @@ describe('GET /v1/config', () => {
     expect((await get('macos', '1')).json().appUpdate).toBeNull()
   })
 
-  it('ignores arch for android', async () => {
-    expect((await get('android', '1', 'arm64')).json().appUpdate.url).toContain('.apk')
+  it('offers android its split APK when published, else the universal one', async () => {
+    RELEASES['android-arm64-v8a'] = release(1234, 'https://x/ymusic-1234-arm64-v8a.apk')
+    expect((await get('android', '1', 'arm64-v8a')).json().appUpdate.url).toContain('arm64-v8a')
+    expect((await get('android', '1', 'x86_64')).json().appUpdate.url).toBe('https://x/ymusic-1234.apk')
+    expect((await get('android', '1')).json().appUpdate.url).toBe('https://x/ymusic-1234.apk')
   })
 
   it('offers nothing to a platform with no release', async () => {

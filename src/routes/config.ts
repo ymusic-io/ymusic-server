@@ -19,19 +19,24 @@ export interface AppRelease {
 
 /**
  * The newest build per platform, null while none is published. Desktop keys carry the arch
- * (x-arch); Android's APK is universal. Paste `scripts/sign-app-update.mjs` output here.
+ * (x-arch). Android sends its primary ABI: its split APK when one is published, else the universal
+ * `android` one. Paste `scripts/sign-app-update.mjs` output here.
  */
 export const RELEASES: Record<string, AppRelease | null> = {
   android: null,
+  'android-arm64-v8a': null,
+  'android-x86_64': null,
   'macos-arm64': null,
   'macos-x64': null,
   'windows-x64': null,
   'linux-x64': null,
 }
 
-/** `android`, or `<os>-<arch>` for desktop. */
-function platformOf(os: string, arch: string): string {
-  return os === 'android' || arch === '' ? os : `${os}-${arch}`
+/** The release for this caller: `<os>-<arch>`; Android falls back to its universal `android` APK. */
+function releaseFor(os: string, arch: string): AppRelease | null {
+  const exact = arch === '' ? RELEASES[os] : RELEASES[`${os}-${arch}`]
+  if (exact) return exact
+  return os === 'android' ? (RELEASES.android ?? null) : null
 }
 
 /**
@@ -71,7 +76,7 @@ export default async function configRoutes(app: FastifyInstance): Promise<void> 
     const appVer = Number.parseInt(header(req.headers['x-app-ver']) ?? '', 10) || -1
 
     const arch = (header(req.headers['x-arch']) ?? '').toLowerCase()
-    const release = RELEASES[platformOf(os, arch)] ?? null
+    const release = releaseFor(os, arch)
 
     return {
       variableA: 123,
