@@ -7,3 +7,4 @@ docs/
 tls/
 dev.env
 dashboard.env
+sync.sh
