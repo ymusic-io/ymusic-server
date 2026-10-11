@@ -14,7 +14,8 @@
     "test": "vitest run",
     "typecheck": "tsc -p tsconfig.json --noEmit",
     "dev:local": "node --env-file=dev.env --import tsx src/index.ts",
-    "test:local": "node --env-file=dev.env node_modules/.bin/vitest run test/ingest.test.ts"
+    "test:local": "node --env-file=dev.env node_modules/.bin/vitest run test/ingest.test.ts",
+    "dashboard": "node --env-file=dashboard.env scripts/dashboard.mjs"
   },
   "dependencies": {
     "@fastify/cookie": "^11.1.2",

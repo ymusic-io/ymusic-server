@@ -1,0 +1,189 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>YMusic Analytics</title>
+<style>
+  :root {
+    --bg: #f6f7f9; --card: #ffffff; --text: #1b1f24; --muted: #66707c; --line: #e3e6ea;
+    --c1: #2f6fde; --c2: #e0802e; --c3: #2a9d6f; --c4: #9b59b6;
+    color-scheme: light;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --bg: #111418; --card: #1a1e24; --text: #e6e9ed; --muted: #8b95a1; --line: #2a3038;
+      --c1: #5b93f0; --c2: #f0a05b; --c3: #4cc395; --c4: #b98ad0;
+      color-scheme: dark;
+    }
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: var(--bg); color: var(--text);
+         font: 14px/1.45 -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; }
+  main { max-width: 1180px; margin: 0 auto; padding: 24px 16px 48px; }
+  header { display: flex; flex-wrap: wrap; align-items: baseline; gap: 8px 16px; margin-bottom: 20px; }
+  h1 { font-size: 22px; margin: 0; }
+  h2 { font-size: 14px; font-weight: 600; margin: 0 0 12px; }
+  .muted { color: var(--muted); }
+  .kpis { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 12px; margin-bottom: 16px; }
+  .kpi, .card { background: var(--card); border: 1px solid var(--line); border-radius: 10px; }
+  .kpi { padding: 14px 16px; }
+  .kpi b { display: block; font-size: 26px; font-variant-numeric: tabular-nums; }
+  .grid { display: grid; grid-template-columns: repeat(6, minmax(0, 1fr)); gap: 16px; }
+  .card { padding: 16px; min-width: 0; grid-column: span 2; }
+  .wide { grid-column: span 6; }
+  .half { grid-column: span 3; }
+  @media (max-width: 760px) { .card, .half { grid-column: span 6; } }
+  .legend { display: flex; gap: 14px; flex-wrap: wrap; margin: -4px 0 8px; font-size: 12px; color: var(--muted); }
+  .legend i { display: inline-block; width: 10px; height: 10px; border-radius: 2px; margin-right: 5px; vertical-align: -1px; }
+  .chart { position: relative; }
+  svg { display: block; width: 100%; height: auto; overflow: visible; }
+  svg text { fill: var(--muted); font-size: 11px; }
+  .tip { position: absolute; pointer-events: none; background: var(--card); border: 1px solid var(--line);
+         border-radius: 6px; padding: 6px 8px; font-size: 12px; white-space: nowrap; display: none;
+         box-shadow: 0 2px 8px rgba(0,0,0,.12); }
+  table { width: 100%; border-collapse: collapse; font-variant-numeric: tabular-nums; }
+  th, td { text-align: right; padding: 5px 8px; border-bottom: 1px solid var(--line); }
+  th:first-child, td:first-child { text-align: left; }
+  th { font-weight: 600; color: var(--muted); font-size: 12px; }
+  .scroll { max-height: 360px; overflow: auto; }
+  .card > div:not(.legend) { overflow-x: auto; }
+  .bar { height: 8px; border-radius: 4px; background: var(--c1); }
+  .empty { color: var(--muted); padding: 24px 0; text-align: center; }
+</style>
+</head>
+<body>
+<main>
+  <header>
+    <h1>YMusic Analytics</h1>
+    <span class="muted" id="stamp"></span>
+  </header>
+  <section class="kpis" id="kpis"></section>
+  <section class="grid">
+    <div class="card wide"><h2>Active devices</h2><div id="active"></div></div>
+    <div class="card half"><h2>New devices per day</h2><div id="new"></div></div>
+    <div class="card half"><h2>App launches per day</h2><div id="launches"></div></div>
+    <div class="card wide"><h2>Retention by first-seen day</h2><div class="scroll" id="retention"></div></div>
+    <div class="card"><h2>Platforms <span class="muted">· active 30 days</span></h2><div id="platforms"></div></div>
+    <div class="card"><h2>App versions <span class="muted">· active 30 days</span></h2><div id="versions"></div></div>
+    <div class="card"><h2>Countries <span class="muted">· active 30 days</span></h2><div id="countries"></div></div>
+  </section>
+</main>
+<script>
+const DATA = /*DATA*/null;
+const fmt = (n) => n == null ? '—' : n.toLocaleString('en-US');
+const pct = (n, of) => n == null || !of ? '—' : (100 * n / of).toFixed(1) + '%';
+const el = (tag, attrs = {}, text) => {
+  const node = document.createElementNS(tag === 'svg' || attrs.svg ? 'http://www.w3.org/2000/svg' : 'http://www.w3.org/1999/xhtml', tag);
+  for (const [k, v] of Object.entries(attrs)) if (k !== 'svg') node.setAttribute(k, v);
+  if (text != null) node.textContent = text;
+  return node;
+};
+const esc = (s) => String(s).replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
+
+document.getElementById('stamp').textContent =
+  `Generated ${new Date(DATA.generatedAt).toLocaleString()} · today = ${DATA.summary.today} (+07)`;
+
+const s = DATA.summary;
+document.getElementById('kpis').innerHTML = [
+  ['Active today', s.dau], ['Active 7 days', s.wau], ['Active 30 days', s.mau],
+  ['New today', s.new_today], ['Launches today', s.launches_today], ['Devices ever', s.devices],
+].map(([label, value]) => `<div class="kpi"><span class="muted">${label}</span><b>${fmt(value)}</b></div>`).join('');
+
+// A day-indexed line/bar chart with a hover readout. series: [{key, label, color, type}]
+function timeChart(target, rows, series, height = 220) {
+  const box = document.getElementById(target);
+  if (series.length > 1) {
+    box.insertAdjacentHTML('beforeend', '<div class="legend">' +
+      series.map((sr) => `<span><i style="background:var(${sr.color})"></i>${sr.label}</span>`).join('') + '</div>');
+  }
+  const W = Math.max(280, box.clientWidth), H = height, L = 44, R = 8, T = 8, B = 22;
+  const max = Math.max(1, ...rows.flatMap((r) => series.map((sr) => r[sr.key])));
+  const nice = (() => { const p = 10 ** Math.floor(Math.log10(max)); return Math.ceil(max / p) * p; })();
+  const x = (i) => L + (rows.length <= 1 ? 0 : i * (W - L - R) / (rows.length - 1));
+  const y = (v) => T + (H - T - B) * (1 - v / nice);
+  const svg = el('svg', { viewBox: `0 0 ${W} ${H}`, role: 'img' });
+  for (let k = 0; k <= 4; k++) {
+    const v = nice * k / 4;
+    svg.append(el('line', { svg: 1, x1: L, x2: W - R, y1: y(v), y2: y(v), stroke: 'var(--line)' }));
+    svg.append(el('text', { svg: 1, x: L - 6, y: y(v) + 4, 'text-anchor': 'end' }, fmt(Math.round(v))));
+  }
+  const step = Math.max(1, Math.ceil(rows.length / Math.max(2, Math.floor(W / 90))));
+  rows.forEach((r, i) => {
+    const last = rows.length - 1;
+    if ((i % step === 0 && last - i >= step / 2) || i === last) {
+      const anchor = i === 0 ? 'start' : i === last ? 'end' : 'middle';
+      svg.append(el('text', { svg: 1, x: x(i), y: H - 4, 'text-anchor': anchor }, r.day.slice(5)));
+    }
+  });
+  const slot = (W - L - R) / Math.max(1, rows.length);
+  for (const sr of series) {
+    if (sr.type === 'bar') {
+      rows.forEach((r, i) => {
+        const h = (H - T - B) - (y(r[sr.key]) - T);
+        svg.append(el('rect', { svg: 1, x: x(i) - slot * 0.35, y: y(r[sr.key]), width: slot * 0.7, height: Math.max(0, h),
+          fill: `var(${sr.color})`, rx: 1.5 }));
+      });
+    } else {
+      const d = rows.map((r, i) => `${i ? 'L' : 'M'}${x(i).toFixed(1)},${y(r[sr.key]).toFixed(1)}`).join('');
+      svg.append(el('path', { svg: 1, d, fill: 'none', stroke: `var(${sr.color})`, 'stroke-width': 2, 'stroke-linejoin': 'round' }));
+    }
+  }
+  const cursor = el('line', { svg: 1, y1: T, y2: H - B, stroke: 'var(--muted)', 'stroke-dasharray': '3 3', visibility: 'hidden' });
+  svg.append(cursor);
+  const wrap = el('div', { class: 'chart' });
+  const tip = el('div', { class: 'tip' });
+  wrap.append(svg, tip);
+  box.append(wrap);
+  svg.addEventListener('pointermove', (ev) => {
+    const rect = svg.getBoundingClientRect();
+    const vx = (ev.clientX - rect.left) * W / rect.width;
+    const i = Math.min(rows.length - 1, Math.max(0, Math.round((vx - L) / ((W - L - R) / Math.max(1, rows.length - 1)))));
+    cursor.setAttribute('x1', x(i)); cursor.setAttribute('x2', x(i)); cursor.setAttribute('visibility', 'visible');
+    tip.innerHTML = `<b>${rows[i].day}</b><br>` +
+      series.map((sr) => `<span style="color:var(${sr.color})">■</span> ${sr.label}: ${fmt(rows[i][sr.key])}`).join('<br>');
+    tip.style.display = 'block';
+    const px = x(i) * rect.width / W;
+    tip.style.left = Math.min(px + 12, rect.width - tip.offsetWidth) + 'px';
+    tip.style.top = '8px';
+  });
+  svg.addEventListener('pointerleave', () => { tip.style.display = 'none'; cursor.setAttribute('visibility', 'hidden'); });
+}
+
+function table(target, head, body) {
+  const box = document.getElementById(target);
+  if (!body.length) { box.innerHTML = '<div class="empty">No data yet</div>'; return; }
+  box.innerHTML = '<table><thead><tr>' + head.map((h) => `<th>${h}</th>`).join('') + '</tr></thead><tbody>' +
+    body.map((cells) => '<tr>' + cells.map((c) => `<td>${c}</td>`).join('') + '</tr>').join('') + '</tbody></table>';
+}
+
+// label, count, share bar — for the 30-day breakdowns.
+function shares(target, rows, label) {
+  const total = rows.reduce((sum, r) => sum + r.devices, 0);
+  table(target, ['', 'Devices', 'Share', ''], rows.map((r) => [
+    esc(label(r)), fmt(r.devices), pct(r.devices, total),
+    `<div class="bar" style="width:${Math.max(2, 100 * r.devices / total)}px"></div>`,
+  ]));
+}
+
+function drawCharts() {
+  for (const id of ['active', 'new', 'launches']) document.getElementById(id).replaceChildren();
+timeChart('active', DATA.daily, [
+  { key: 'mau', label: 'Active 30 days', color: '--c2' },
+  { key: 'dau', label: 'Active today', color: '--c1' },
+], 260);
+timeChart('new', DATA.daily, [{ key: 'new_devices', label: 'New devices', color: '--c3', type: 'bar' }]);
+timeChart('launches', DATA.daily, [{ key: 'launches', label: 'Launches', color: '--c4', type: 'bar' }]);
+}
+drawCharts();
+let resizeTimer;
+addEventListener('resize', () => { clearTimeout(resizeTimer); resizeTimer = setTimeout(drawCharts, 150); });
+
+table('retention', ['First seen', 'Devices', 'Day 1', 'Day 7', 'Day 30'],
+  DATA.retention.map((r) => [r.cohort, fmt(r.size), pct(r.d1, r.size), pct(r.d7, r.size), pct(r.d30, r.size)]));
+shares('platforms', DATA.platforms, (r) => r.os || '—');
+shares('versions', DATA.versions, (r) => `${r.os || '—'} ${r.version}`);
+shares('countries', DATA.countries, (r) => r.country);
+</script>
+</body>
+</html>

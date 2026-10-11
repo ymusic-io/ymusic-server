@@ -6,3 +6,4 @@ data/
 docs/
 tls/
 dev.env
+dashboard.env
