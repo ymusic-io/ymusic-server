@@ -146,6 +146,8 @@ export class Analytics {
      * the cookie value by plain equality.
      */
     days: string[]
+    /** Rewrite the device row even with no day to credit: its app version changed. */
+    refreshDevice?: boolean
   }): Promise<void> {
     const params: unknown[] = []
     const bind = (value: unknown): string => {
@@ -154,7 +156,7 @@ export class Analytics {
     }
 
     const ctes: string[] = []
-    if (input.days.length > 0) {
+    if (input.days.length > 0 || input.refreshDevice) {
       ctes.push(
         `dev AS (
            INSERT INTO devices (id, os, os_version, app_version, country, created_at, updated_at)
@@ -166,6 +168,8 @@ export class Analytics {
              country = COALESCE(EXCLUDED.country, devices.country),
              updated_at = now())`,
       )
+    }
+    if (input.days.length > 0) {
       ctes.push(
         `act AS (
            INSERT INTO daily_activity (day, device_id)

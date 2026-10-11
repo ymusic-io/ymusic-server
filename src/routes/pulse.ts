@@ -11,8 +11,12 @@ const MAX_EVENT_AGE_MS = 60 * 24 * 60 * 60 * 1000
 /** Wire contract: the client chunks its queue to this many events per pulse; more is a 413. */
 const MAX_EVENTS_PER_BATCH = 15
 
-/** The advisory write-skip cookie: the last day this device's activity was credited. */
+/**
+ * The advisory write-skip cookie, `<day>.<appVersion>`: the last day this device's activity was
+ * credited and the app version the device row last recorded.
+ */
 const ACTIVITY_COOKIE = 'act'
+const ACTIVITY_VALUE = /^(\d{4}-\d{2}-\d{2})\.(-?\d+)$/
 const ACTIVITY_COOKIE_MAX_AGE_S = 2 * 24 * 60 * 60
 
 /**
@@ -91,9 +95,13 @@ export default async function pulseRoutes(app: FastifyInstance): Promise<void> {
     // device. Only days AFTER it need crediting ('YYYY-MM-DD' compares as text; the client
     // sends oldest→newest, so a backlog batch spanning days credits exactly the uncovered
     // tail). Absent or invalid reads as "credit everything" — ON CONFLICT stays the guarantee.
-    const cookieDay = readActivityCookie(req)
+    // A version other than the cookie's rewrites the device row even mid-day, so an update shows
+    // in the version breakdown at once.
+    const cookie = readActivityCookie(req)
+    const cookieDay = cookie?.day
     const batchDays = [...days].sort()
     const creditDays = cookieDay === undefined ? batchDays : batchDays.filter((day) => day > cookieDay)
+    const versionChanged = cookie?.appVersion !== ctx.appVersion
     try {
       await app.analytics.ingest({
         deviceId,
@@ -103,17 +111,18 @@ export default async function pulseRoutes(app: FastifyInstance): Promise<void> {
         country: ctx.country,
         events: accepted,
         days: creditDays,
+        refreshDevice: versionChanged,
       })
     } catch (error) {
       req.log.error({ err: error }, 'pulse ingest failed — client will retry from its queue')
       return reply.code(500).send()
     }
-    // The watermark only moves forward, and is only re-sent when it MOVED — an unchanged value
-    // is a wasted Set-Cookie. (Max-Age then refreshes on change, not per request: fine, since
+    // The watermark only moves forward, and is only re-sent when it or the version CHANGED — an
+    // unchanged value is a wasted Set-Cookie. (Max-Age then refreshes on change, not per request: fine, since
     // an active device moves it daily and the cookie lives two.)
     const lastDay = batchDays.at(-1)!
     const watermark = cookieDay !== undefined && cookieDay > lastDay ? cookieDay : lastDay
-    if (watermark !== cookieDay) setActivityCookie(reply, watermark)
+    if (watermark !== cookieDay || versionChanged) setActivityCookie(reply, watermark, ctx.appVersion)
     return reply.code(204).send()
   })
 }
@@ -128,16 +137,17 @@ function stringProps(raw: unknown): Record<string, string> {
   return props
 }
 
-function readActivityCookie(req: FastifyRequest): string | undefined {
+function readActivityCookie(req: FastifyRequest): { day: string; appVersion: number } | undefined {
   const raw = req.cookies?.[ACTIVITY_COOKIE]
   if (raw === undefined || req.unsignCookie === undefined) return undefined
   const unsigned = req.unsignCookie(raw)
-  return unsigned.valid && unsigned.value !== null ? unsigned.value : undefined
+  const match = unsigned.valid && unsigned.value !== null ? ACTIVITY_VALUE.exec(unsigned.value) : null
+  return match ? { day: match[1]!, appVersion: Number(match[2]) } : undefined
 }
 
-function setActivityCookie(reply: FastifyReply, day: string): void {
+function setActivityCookie(reply: FastifyReply, day: string, appVersion: number): void {
   if (reply.setCookie === undefined) return // cookie plugin off (no secret configured)
-  reply.setCookie(ACTIVITY_COOKIE, day, {
+  reply.setCookie(ACTIVITY_COOKIE, `${day}.${appVersion}`, {
     signed: true,
     httpOnly: true,
     path: '/v1',
