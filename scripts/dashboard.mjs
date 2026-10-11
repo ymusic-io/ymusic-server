@@ -11,7 +11,8 @@
 //   ssh -N -L 15432:<db-private-ip>:5432 root@<server-ip>
 //   YM_PG=postgres://ymusic_readonly:<pw>@db.ymix.io:15432/ymusic
 //
-// Every day is the DB's own calendar day (+07), the same buckets the ingest writes.
+// Every day is the DB's own calendar day (+07), the same buckets the ingest writes. Closed days
+// come from the server's nightly rollup tables; only today is read from the raw tables.
 // ?from=YYYY-MM-DD&to=YYYY-MM-DD picks the charted range (inclusive); the last 90 days by default.
 // ?os=<platform> narrows every number to devices whose latest pulse came from that platform.
 
@@ -59,73 +60,77 @@ async function range(params, oses) {
 
 async function collect(from, to, os, oses) {
   // os is one of the stored values (checked by range), so inlining it as a literal is safe.
-  const only = os && `(SELECT id FROM devices WHERE os = '${os.replace(/'/g, "''")}')`
-  const dev = (alias = 'devices') => (only ? `(SELECT * FROM devices WHERE id IN ${only}) ${alias}` : `devices ${alias}`)
-  const act = (alias = 'daily_activity') =>
-    only ? `(SELECT * FROM daily_activity WHERE device_id IN ${only}) ${alias}` : `daily_activity ${alias}`
-  const starts = (alias = 'event_app_start') =>
-    only ? `(SELECT * FROM event_app_start WHERE device_id IN ${only}) ${alias}` : `event_app_start ${alias}`
+  const onOs = (column) => (os ? `${column} = '${os.replace(/'/g, "''")}'` : 'true')
+  const ofOs = os ? `device_id IN (SELECT id FROM devices WHERE ${onOs('os')})` : 'true'
+  const [{ today, end }] = await rows(`SELECT current_date::text AS today, (current_date - 1)::text AS "end"`)
 
-  const [summary] = await rows(`
-    SELECT current_date::text AS today,
-           (SELECT count(*) FROM ${dev()})::int AS devices,
-           (SELECT count(*) FROM ${act()} WHERE day = current_date)::int AS dau,
-           (SELECT count(DISTINCT device_id) FROM ${act()} WHERE day > current_date - 7)::int AS wau,
-           (SELECT count(DISTINCT device_id) FROM ${act()} WHERE day > current_date - 30)::int AS mau,
-           (SELECT count(*) FROM ${dev()} WHERE date(created_at) = current_date)::int AS new_today,
-           (SELECT count(*) FROM ${starts()} WHERE date(at) = current_date)::int AS launches_today`)
+  // Today is still open, so it is read live; last_active >= d means "active on d or later".
+  const [live] = await rows(`
+    SELECT current_date::text AS day,
+           (SELECT count(*) FROM devices WHERE last_active >= current_date AND ${onOs('os')})::int AS dau,
+           (SELECT count(*) FROM devices WHERE last_active > current_date - 7 AND ${onOs('os')})::int AS wau,
+           (SELECT count(*) FROM devices WHERE last_active > current_date - 30 AND ${onOs('os')})::int AS mau,
+           (SELECT count(*) FROM devices
+             WHERE created_at >= current_date::timestamptz AND ${onOs('os')})::int AS new_devices,
+           (SELECT count(*) FROM event_app_start
+             WHERE at >= current_date::timestamptz AND ${ofOs})::int AS launches`)
 
-  const [period] = await rows(
-    `SELECT $1::text AS "from", $2::text AS "to",
-            (SELECT count(DISTINCT device_id) FROM ${act()} WHERE day BETWEEN $1::date AND $2::date)::int AS active,
-            (SELECT count(*) FROM ${dev()} WHERE date(created_at) BETWEEN $1::date AND $2::date)::int AS new_devices,
-            (SELECT count(*) FROM ${starts()} WHERE date(at) BETWEEN $1::date AND $2::date)::int AS launches`,
+  // Closed days come from the nightly rollup (ymusic-server src/stats.ts).
+  const closed = await rows(
+    `SELECT d::date::text AS day,
+            coalesce(sum(s.dau), 0)::int AS dau, coalesce(sum(s.wau), 0)::int AS wau,
+            coalesce(sum(s.mau), 0)::int AS mau, coalesce(sum(s.new_devices), 0)::int AS new_devices,
+            coalesce(sum(s.launches), 0)::int AS launches
+     FROM generate_series($1::date, LEAST($2::date, current_date - 1), '1 day') d
+     LEFT JOIN stats_day s ON s.day = d::date AND ${onOs('s.os')}
+     GROUP BY d ORDER BY d`,
     [from, to],
   )
-
-  // wau / mau: distinct devices over the 7 / 30 days ending on that day.
-  const daily = await rows(
-    `WITH days AS (SELECT generate_series($1::date, $2::date, '1 day')::date AS day)
-     SELECT d.day::text AS day,
-            (SELECT count(*) FROM ${act('a')} WHERE a.day = d.day)::int AS dau,
-            (SELECT count(DISTINCT a.device_id) FROM ${act('a')}
-              WHERE a.day > d.day - 7 AND a.day <= d.day)::int AS wau,
-            (SELECT count(DISTINCT a.device_id) FROM ${act('a')}
-              WHERE a.day > d.day - 30 AND a.day <= d.day)::int AS mau,
-            (SELECT count(*) FROM ${dev('v')} WHERE date(v.created_at) = d.day)::int AS new_devices,
-            (SELECT count(*) FROM ${starts('e')} WHERE date(e.at) = d.day)::int AS launches
-     FROM days d ORDER BY d.day`,
-    [from, to],
+  const daily = to >= today ? [...closed, live] : closed
+  const [{ before }] = await rows(
+    `SELECT coalesce(sum(new_devices), 0)::int AS before FROM stats_day WHERE ${onOs('os')}`,
   )
+  const summary = {
+    today,
+    dau: live.dau,
+    wau: live.wau,
+    mau: live.mau,
+    new_today: live.new_devices,
+    launches_today: live.launches,
+    devices: before + live.new_devices,
+  }
 
-  // Firebase-style retention, ending yesterday (today is still partial). Devices are grouped by
-  // their first day; day N / week N of a device count from ITS first day, and only devices whose
-  // day N has already ended are counted for it.
-  const [{ end }] = await rows(`SELECT (current_date - 1)::text AS "end"`)
+  // Unique devices over a range are exact only when it ends today (last_active); a past range
+  // would need the raw activity, which is too much to scan per page view.
+  const endsToday = to === today
+  const [{ active }] = endsToday
+    ? await rows(`SELECT count(*)::int AS active FROM devices WHERE last_active >= $1::date AND ${onOs('os')}`, [from])
+    : [{ active: null }]
+  const sum = (key) => daily.reduce((total, day) => total + day[key], 0)
+  const period = { from, to, active, new_devices: sum('new_devices'), launches: sum('launches') }
+
+  // Retention ends yesterday. Day N / week N count from each device's own first day; a first day
+  // only counts toward N once its day N has ended.
   const RETENTION_DAYS = 42
   const retentionDaily = await rows(
-    `WITH c AS (SELECT id, date(created_at) AS first FROM ${dev()}
-                WHERE date(created_at) BETWEEN $1::date - ($2::int - 1) AND $1::date)
-     SELECT n AS day,
-            (SELECT count(*) FROM c WHERE c.first + n <= $1::date)::int AS eligible,
-            (SELECT count(*) FROM c WHERE c.first + n <= $1::date
-               AND EXISTS (SELECT 1 FROM ${act('a')} WHERE a.device_id = c.id AND a.day = c.first + n))::int AS active
-     FROM generate_series(0, $2::int - 1) n`,
+    `SELECT g.n AS day,
+            (SELECT coalesce(sum(new_devices), 0) FROM stats_day
+              WHERE day > $1::date - $2::int AND day <= $1::date - g.n AND ${onOs('os')})::int AS eligible,
+            (SELECT coalesce(sum(active), 0) FROM stats_retention r
+              WHERE r.n = g.n AND first_day > $1::date - $2::int AND first_day <= $1::date - g.n
+                AND ${onOs('os')})::int AS active
+     FROM generate_series(0, $2::int - 1) g(n)`,
     [end, RETENTION_DAYS],
   )
 
   // Cohort k (0 = newest) is the 7 days ending 7k days before the end.
   const COHORT_WEEKS = 6
   const cohortRows = await rows(
-    `WITH c AS (
-       SELECT id, date(created_at) AS first, ($1::date - date(created_at)) / 7 AS k
-       FROM ${dev()} WHERE date(created_at) BETWEEN $1::date - (7 * $2::int - 1) AND $1::date
-     )
-     SELECT c.k, -1 AS week, count(*)::int AS devices FROM c GROUP BY c.k
+    `SELECT ($1::date - day) / 7 AS k, -1 AS week, sum(new_devices)::int AS devices FROM stats_day
+     WHERE day > $1::date - 7 * $2::int AND day <= $1::date AND ${onOs('os')} GROUP BY 1
      UNION ALL
-     SELECT c.k, ((a.day - c.first) / 7)::int, count(DISTINCT a.device_id)::int
-     FROM c JOIN ${act('a')} ON a.device_id = c.id AND a.day >= c.first AND a.day <= $1::date
-       AND a.day < c.first + 7 * $2::int
+     SELECT ($1::date - first_day) / 7, week, sum(active)::int FROM stats_retention_week
+     WHERE first_day > $1::date - 7 * $2::int AND first_day <= $1::date AND week < $2::int AND ${onOs('os')}
      GROUP BY 1, 2`,
     [end, COHORT_WEEKS],
   )
@@ -141,22 +146,24 @@ async function collect(from, to, os, oses) {
   })
   const retention = { end, daily: retentionDaily, cohorts }
 
-  // Breakdowns over devices active in the range.
-  const active = `id IN (SELECT device_id FROM ${act()} WHERE day BETWEEN $1::date AND $2::date)`
-  const versions = await rows(
-    `SELECT os, app_version AS version, count(*)::int AS devices FROM ${dev()} WHERE ${active}
-     GROUP BY 1, 2 ORDER BY 3 DESC LIMIT 20`,
-    [from, to],
-  )
-  const platforms = await rows(
-    `SELECT os, count(*)::int AS devices FROM ${dev()} WHERE ${active} GROUP BY 1 ORDER BY 2 DESC`,
-    [from, to],
-  )
-  const countries = await rows(
-    `SELECT coalesce(country, '—') AS country, count(*)::int AS devices FROM ${dev()} WHERE ${active}
-     GROUP BY 1 ORDER BY 2 DESC LIMIT 15`,
-    [from, to],
-  )
+  // Breakdowns over devices active in the range, by their current attributes: one scan, three
+  // groupings. GROUPING() bits are (os, app_version, country), 1 = rolled up.
+  let versions = null
+  let platforms = null
+  let countries = null
+  if (endsToday) {
+    const groups = await rows(
+      `SELECT os, app_version AS version, coalesce(country, '—') AS country, count(*)::int AS devices,
+              GROUPING(os, app_version, country) AS g
+       FROM devices WHERE last_active >= $1::date AND ${onOs('os')}
+       GROUP BY GROUPING SETS ((os, app_version), (os), (country))
+       ORDER BY devices DESC`,
+      [from],
+    )
+    versions = groups.filter((r) => r.g === 1).slice(0, 20)
+    platforms = groups.filter((r) => r.g === 3)
+    countries = groups.filter((r) => r.g === 6).slice(0, 15)
+  }
   return { os, oses, summary, period, daily, retention, versions, platforms, countries }
 }
 
@@ -167,7 +174,7 @@ createServer(async (req, res) => {
     return
   }
   try {
-    const oses = (await rows(`SELECT DISTINCT os FROM devices ORDER BY os`)).map((r) => r.os)
+    const oses = (await rows(`SELECT DISTINCT os FROM stats_day ORDER BY os`)).map((r) => r.os)
     const data = await collect(...(await range(url.searchParams, oses)), oses)
     // Read per request, so an edited template shows on reload.
     const html = readFileSync(new URL('./dashboard.html', import.meta.url), 'utf8').replace(
