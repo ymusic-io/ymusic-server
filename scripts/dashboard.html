@@ -69,7 +69,6 @@
 <main>
   <header>
     <h1>YMusic Analytics</h1>
-    <span class="muted" id="stamp"></span>
   </header>
   <section class="kpis" id="kpis"></section>
   <form class="range" method="get">
@@ -103,8 +102,6 @@ const el = (tag, attrs = {}, text) => {
 };
 const esc = (s) => String(s).replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
 
-document.getElementById('stamp').textContent =
-  `Updated ${new Date(DATA.generatedAt).toLocaleTimeString()} · reload for fresh numbers · today = ${DATA.summary.today} (+07)`;
 
 const s = DATA.summary;
 document.getElementById('kpis').innerHTML = [
