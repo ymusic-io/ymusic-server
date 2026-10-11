@@ -25,6 +25,12 @@
   nav { display: flex; gap: 4px; }
   nav a { color: var(--muted); text-decoration: none; padding: 4px 10px; border-radius: 6px; }
   nav a.on { color: var(--text); background: var(--card); border: 1px solid var(--line); }
+  h1 a { color: inherit; text-decoration: none; }
+  .features { display: grid; grid-template-columns: repeat(auto-fit, minmax(260px, 1fr)); gap: 16px; }
+  .card.feature { display: block; grid-column: auto; padding: 20px; color: inherit; text-decoration: none; }
+  .feature:hover { border-color: var(--c1); }
+  .feature h2 { font-size: 16px; margin-bottom: 6px; }
+  .feature p { margin: 0; }
   .error { background: var(--card); border: 1px solid var(--c2); border-radius: 10px; padding: 12px 16px; margin-bottom: 16px; }
   [hidden] { display: none !important; }
   h1 { font-size: 22px; margin: 0; }
@@ -73,11 +79,17 @@
 <body>
 <main>
   <header>
-    <h1>YMusic</h1>
-    <nav><a href="#analytics" data-view="analytics">Analytics</a><a href="#config" data-view="config">App config</a></nav>
+    <h1><a href="/">YMusic</a></h1>
+    <nav hidden><a href="/analytics" data-view="analytics">Analytics</a><a href="/config" data-view="config">App config</a></nav>
   </header>
   <div class="error" id="error" hidden></div>
-  <div id="view-analytics">
+  <div id="view-home" hidden>
+    <section class="features">
+      <a class="card feature" href="/analytics"><h2>Analytics</h2><p class="muted">Active devices, retention, versions, platforms and countries.</p></a>
+      <a class="card feature" href="/config"><h2>App config</h2><p class="muted">Feature flags and update availability. Not implemented yet.</p></a>
+    </section>
+  </div>
+  <div id="view-analytics" hidden>
   <section class="kpis" id="kpis"></section>
   <form class="range" id="range">
     <h2>Range</h2>

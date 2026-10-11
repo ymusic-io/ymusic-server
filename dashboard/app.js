@@ -234,7 +234,7 @@ async function load() {
 }
 
 function navigate(search) {
-  history.pushState(null, '', search + location.hash);
+  history.pushState(null, '', search);
   load();
 }
 
@@ -254,16 +254,14 @@ document.getElementById('presets').addEventListener('click', (ev) => {
 });
 addEventListener('popstate', load);
 
-function showView() {
-  const view = location.hash === '#config' ? 'config' : 'analytics';
-  for (const name of ['analytics', 'config']) document.getElementById('view-' + name).hidden = name !== view;
-  for (const link of document.querySelectorAll('nav a')) link.classList.toggle('on', link.dataset.view === view);
-  if (view === 'analytics' && DATA) drawCharts();
-}
-addEventListener('hashchange', showView);
+// One page for every path; the path picks the view.
+const VIEWS = { '/': 'home', '/analytics': 'analytics', '/config': 'config' };
+const view = VIEWS[location.pathname] ?? 'home';
+for (const name of Object.values(VIEWS)) document.getElementById('view-' + name).hidden = name !== view;
+document.querySelector('nav').hidden = view === 'home';
+for (const link of document.querySelectorAll('nav a')) link.classList.toggle('on', link.dataset.view === view);
 
 let resizeTimer;
 addEventListener('resize', () => { clearTimeout(resizeTimer); resizeTimer = setTimeout(() => DATA && drawCharts(), 150); });
 
-showView();
-load();
+if (view === 'analytics') load();

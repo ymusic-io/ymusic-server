@@ -16,6 +16,8 @@ export interface DashboardOptions {
 const PUBLIC = new URL('../../dashboard/', import.meta.url)
 const FILES: Record<string, string> = {
   '/': 'index.html',
+  '/analytics': 'index.html',
+  '/config': 'index.html',
   '/app.js': 'app.js',
 }
 const TYPES: Record<string, string> = { html: 'text/html; charset=utf-8', js: 'text/javascript; charset=utf-8' }
