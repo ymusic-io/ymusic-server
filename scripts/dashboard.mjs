@@ -12,12 +12,17 @@
 //   YM_PG=postgres://ymusic_readonly:<pw>@db.ymix.io:15432/ymusic
 //
 // Every day is the DB's own calendar day (+07), the same buckets the ingest writes.
+// ?from=YYYY-MM-DD&to=YYYY-MM-DD picks the charted range (inclusive); the last 90 days by default.
 
 import { readFileSync } from 'node:fs'
 import { createServer } from 'node:http'
 import pg from 'pg'
 
-const DAYS = 90
+const DEFAULT_DAYS = 90
+const MAX_DAYS = 731
+const DAY_MS = 86400000
+const dayMs = (day) => Date.parse(`${day}T00:00:00Z`)
+const isDay = (day) => /^\d{4}-\d{2}-\d{2}$/.test(day) && new Date(dayMs(day) || 0).toISOString().startsWith(day)
 const PORT = Number(process.env.DASHBOARD_PORT ?? 8790)
 
 if (!process.env.YM_PG) {
@@ -33,27 +38,53 @@ const pool = new pg.Pool({
 })
 const rows = async (sql, params = []) => (await pool.query(sql, params)).rows
 
-async function collect() {
+// Returns [from, to] as validated ISO days, or throws a RangeError for the 400 page.
+async function range(params) {
+  const [today] = await rows(`SELECT current_date::text AS day`)
+  let to = params.get('to') || today.day
+  let from = params.get('from') || null
+  for (const day of [from, to]) {
+    if (day != null && !isDay(day)) throw new RangeError(`not a day: ${day}`)
+  }
+  from ??= new Date(dayMs(to) - (DEFAULT_DAYS - 1) * DAY_MS).toISOString().slice(0, 10)
+  if (from > to) [from, to] = [to, from]
+  if ((dayMs(to) - dayMs(from)) / DAY_MS >= MAX_DAYS) {
+    throw new RangeError(`range is longer than ${MAX_DAYS} days`)
+  }
+  return [from, to]
+}
+
+async function collect(from, to) {
   const [summary] = await rows(`
     SELECT current_date::text AS today,
            (SELECT count(*) FROM devices)::int AS devices,
            (SELECT count(*) FROM daily_activity WHERE day = current_date)::int AS dau,
            (SELECT count(DISTINCT device_id) FROM daily_activity WHERE day > current_date - 7)::int AS wau,
            (SELECT count(DISTINCT device_id) FROM daily_activity WHERE day > current_date - 30)::int AS mau,
-           (SELECT count(DISTINCT device_id) FROM daily_activity WHERE day > current_date - 90)::int AS active90,
            (SELECT count(*) FROM devices WHERE date(created_at) = current_date)::int AS new_today,
            (SELECT count(*) FROM event_app_start WHERE date(at) = current_date)::int AS launches_today`)
 
+  const [period] = await rows(
+    `SELECT $1::text AS "from", $2::text AS "to",
+            (SELECT count(DISTINCT device_id) FROM daily_activity WHERE day BETWEEN $1::date AND $2::date)::int AS active,
+            (SELECT count(*) FROM devices WHERE date(created_at) BETWEEN $1::date AND $2::date)::int AS new_devices,
+            (SELECT count(*) FROM event_app_start WHERE date(at) BETWEEN $1::date AND $2::date)::int AS launches`,
+    [from, to],
+  )
+
+  // wau / mau: distinct devices over the 7 / 30 days ending on that day.
   const daily = await rows(
-    `WITH days AS (SELECT generate_series(current_date - ($1::int - 1), current_date, '1 day')::date AS day)
+    `WITH days AS (SELECT generate_series($1::date, $2::date, '1 day')::date AS day)
      SELECT d.day::text AS day,
             (SELECT count(*) FROM daily_activity a WHERE a.day = d.day)::int AS dau,
+            (SELECT count(DISTINCT a.device_id) FROM daily_activity a
+              WHERE a.day > d.day - 7 AND a.day <= d.day)::int AS wau,
             (SELECT count(DISTINCT a.device_id) FROM daily_activity a
               WHERE a.day > d.day - 30 AND a.day <= d.day)::int AS mau,
             (SELECT count(*) FROM devices v WHERE date(v.created_at) = d.day)::int AS new_devices,
             (SELECT count(*) FROM event_app_start e WHERE date(e.at) = d.day)::int AS launches
      FROM days d ORDER BY d.day`,
-    [DAYS],
+    [from, to],
   )
 
   // Weekly cohorts (Monday-start week of first seen), Firebase-style: week N of a device is days
@@ -81,29 +112,33 @@ async function collect() {
     return { cohort, size, weeks }
   })
 
-  // Breakdowns over devices active in the last 30 days.
-  const active30 = `id IN (SELECT device_id FROM daily_activity WHERE day > current_date - 30)`
+  // Breakdowns over devices active in the range.
+  const active = `id IN (SELECT device_id FROM daily_activity WHERE day BETWEEN $1::date AND $2::date)`
   const versions = await rows(
-    `SELECT os, app_version AS version, count(*)::int AS devices FROM devices WHERE ${active30}
+    `SELECT os, app_version AS version, count(*)::int AS devices FROM devices WHERE ${active}
      GROUP BY 1, 2 ORDER BY 3 DESC LIMIT 20`,
+    [from, to],
   )
   const platforms = await rows(
-    `SELECT os, count(*)::int AS devices FROM devices WHERE ${active30} GROUP BY 1 ORDER BY 2 DESC`,
+    `SELECT os, count(*)::int AS devices FROM devices WHERE ${active} GROUP BY 1 ORDER BY 2 DESC`,
+    [from, to],
   )
   const countries = await rows(
-    `SELECT coalesce(country, '—') AS country, count(*)::int AS devices FROM devices WHERE ${active30}
+    `SELECT coalesce(country, '—') AS country, count(*)::int AS devices FROM devices WHERE ${active}
      GROUP BY 1 ORDER BY 2 DESC LIMIT 15`,
+    [from, to],
   )
-  return { generatedAt: new Date().toISOString(), summary, daily, retention, versions, platforms, countries }
+  return { generatedAt: new Date().toISOString(), summary, period, daily, retention, versions, platforms, countries }
 }
 
 createServer(async (req, res) => {
-  if (req.url !== '/') {
+  const url = new URL(req.url, 'http://localhost')
+  if (url.pathname !== '/') {
     res.writeHead(404).end()
     return
   }
   try {
-    const data = await collect()
+    const data = await collect(...(await range(url.searchParams)))
     // Read per request, so an edited template shows on reload.
     const html = readFileSync(new URL('./dashboard.html', import.meta.url), 'utf8').replace(
       '/*DATA*/null',
@@ -113,6 +148,10 @@ createServer(async (req, res) => {
     )
     res.writeHead(200, { 'content-type': 'text/html; charset=utf-8', 'cache-control': 'no-store' }).end(html)
   } catch (error) {
+    if (error instanceof RangeError) {
+      res.writeHead(400, { 'content-type': 'text/plain; charset=utf-8' }).end(`Bad range: ${error.message}`)
+      return
+    }
     console.error(error)
     res.writeHead(500, { 'content-type': 'text/plain; charset=utf-8' }).end(`Query failed: ${error.message}`)
   }
