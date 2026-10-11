@@ -205,7 +205,7 @@ function render() {
   document.getElementById('cohortFoot').textContent =
     `${DATA.retention.cohorts.length} weeks ending ${shortDay(DATA.retention.end)}`;
   shares('platforms', DATA.platforms, (r) => r.os || '—');
-  shares('versions', DATA.versions, (r) => `${r.os || '—'} ${r.version}`);
+  shares('versions', DATA.versions, (r) => r.version);
   shares('countries', DATA.countries, (r) => r.country);
 }
 

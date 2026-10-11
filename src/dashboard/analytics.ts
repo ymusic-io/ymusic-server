@@ -153,12 +153,12 @@ export async function analytics(pool: pg.Pool, query: Query) {
       `SELECT os, app_version AS version, coalesce(country, '—') AS country, count(*)::int AS devices,
               GROUPING(os, app_version, country) AS g
        FROM devices WHERE last_active >= $1::date AND ${onOs('os')}
-       GROUP BY GROUPING SETS ((os, app_version), (os), (country))
+       GROUP BY GROUPING SETS ((app_version), (os), (country))
        ORDER BY devices DESC`,
       [from],
     )
     breakdowns = {
-      versions: groups.filter((r) => r.g === 1).slice(0, 20),
+      versions: groups.filter((r) => r.g === 5).slice(0, 20),
       platforms: groups.filter((r) => r.g === 3),
       countries: groups.filter((r) => r.g === 6).slice(0, 15),
     }
