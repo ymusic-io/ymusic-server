@@ -10,8 +10,7 @@ GET /healthz
 
 ```json
 {
-  "variableA": 123,
-  "featureX": true,
+  "features": { "variableA": 123, "featureX": true },
   "appUpdate": {
     "versionCode": 1234,
     "versionName": "4.1.0",
@@ -108,7 +107,7 @@ quietly without that route.
 ## Editing the rules
 
 They are data, edited in the dashboard's App config (shape: [`src/appConfig.ts`](src/appConfig.ts)).
-`flags` go to every caller, `flagsByOs.<os>` overrides them for one platform. A release is one entry
+`flags` go to every caller under `features`, `flagsByOs.<os>` overrides them for one platform. A release is one entry
 in `releases`, offered to every build of that platform below its `versionCode`.
 
 `x-os` is a coarse platform name (`windows`, `android`, …) and `x-arch` the desktop CPU (`x64`,

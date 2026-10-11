@@ -27,7 +27,7 @@ export interface SignedBundle {
 
 /** One version of everything /v1/config answers from, as stored in app_config. */
 export interface AppConfig {
-  /** Sent to every caller as top-level keys. */
+  /** Sent to every caller under `features`. */
   flags: Record<string, unknown>
   /** Per x-os (lower-case) overrides of [flags]. */
   flagsByOs: Record<string, Record<string, unknown>>
@@ -62,8 +62,6 @@ export const DEFAULT_APP_CONFIG: AppConfig = {
   playerJs: null,
 }
 
-const RESERVED = new Set(['appUpdate', 'engineJs', 'playerJs'])
-
 const isObject = (value: unknown): value is Record<string, unknown> =>
   typeof value === 'object' && value !== null && !Array.isArray(value)
 
@@ -74,15 +72,13 @@ export function validateAppConfig(value: unknown): string[] {
   const known = new Set(['flags', 'flagsByOs', 'releases', 'engineJs', 'playerJs'])
   for (const key of Object.keys(value)) if (!known.has(key)) errors.push(`unknown key "${key}"`)
 
-  const checkFlags = (flags: unknown, where: string) => {
-    if (!isObject(flags)) return errors.push(`${where} must be an object`)
-    for (const key of Object.keys(flags)) {
-      if (RESERVED.has(key)) errors.push(`${where}.${key}: "${key}" is set by the server`)
+  if (!isObject(value.flags)) errors.push('flags must be an object')
+  if (!isObject(value.flagsByOs)) errors.push('flagsByOs must be an object')
+  else {
+    for (const [os, flags] of Object.entries(value.flagsByOs)) {
+      if (!isObject(flags)) errors.push(`flagsByOs.${os} must be an object`)
     }
   }
-  checkFlags(value.flags, 'flags')
-  if (!isObject(value.flagsByOs)) errors.push('flagsByOs must be an object')
-  else for (const [os, flags] of Object.entries(value.flagsByOs)) checkFlags(flags, `flagsByOs.${os}`)
 
   const fields = (object: Record<string, unknown>, where: string, spec: Record<string, 'number' | 'string'>) => {
     for (const [key, type] of Object.entries(spec)) {
@@ -128,8 +124,7 @@ function releaseFor(releases: AppConfig['releases'], os: string, arch: string): 
 export function resolveAppConfig(config: AppConfig, caller: { os: string; arch: string; appVer: number }) {
   const release = releaseFor(config.releases, caller.os, caller.arch)
   return {
-    ...config.flags,
-    ...config.flagsByOs[caller.os],
+    features: { ...config.flags, ...config.flagsByOs[caller.os] },
     appUpdate: release && caller.appVer < release.versionCode ? release : null,
     engineJs: config.engineJs,
     playerJs: config.playerJs,
