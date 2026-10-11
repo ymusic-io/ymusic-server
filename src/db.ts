@@ -160,9 +160,9 @@ export interface AcceptedEvent {
   values: unknown[]
 }
 
-/** The one pool every store shares, migrated before anything uses it. */
-export async function openPool(settings: PgSettings): Promise<pg.Pool> {
-  const pool = new pg.Pool({
+/** A pool on `app`, no migration — for the read-only dashboard role. */
+export function createPool(settings: PgSettings, max: number): pg.Pool {
+  return new pg.Pool({
     connectionString: settings.dsn,
     ssl: settings.caFile
       ? {
@@ -172,8 +172,13 @@ export async function openPool(settings: PgSettings): Promise<pg.Pool> {
         }
       : undefined,
     options: '-c search_path=app',
-    max: 5,
+    max,
   })
+}
+
+/** The one pool every store shares, migrated before anything uses it. */
+export async function openPool(settings: PgSettings): Promise<pg.Pool> {
+  const pool = createPool(settings, 5)
   // Every pm2 instance boots at once; concurrent CREATE ... IF NOT EXISTS can still collide.
   const client = await pool.connect()
   try {

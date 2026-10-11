@@ -1,97 +1,4 @@
-<!doctype html>
-<html lang="en">
-<head>
-<meta charset="utf-8">
-<meta name="viewport" content="width=device-width, initial-scale=1">
-<title>YMusic Analytics</title>
-<style>
-  :root {
-    --bg: #f6f7f9; --card: #ffffff; --text: #1b1f24; --muted: #66707c; --line: #e3e6ea;
-    --c1: #2f6fde; --c2: #e0802e; --c3: #2a9d6f; --c4: #9b59b6;
-    color-scheme: light;
-  }
-  @media (prefers-color-scheme: dark) {
-    :root {
-      --bg: #111418; --card: #1a1e24; --text: #e6e9ed; --muted: #8b95a1; --line: #2a3038;
-      --c1: #5b93f0; --c2: #f0a05b; --c3: #4cc395; --c4: #b98ad0;
-      color-scheme: dark;
-    }
-  }
-  * { box-sizing: border-box; }
-  body { margin: 0; background: var(--bg); color: var(--text);
-         font: 14px/1.45 -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; }
-  main { max-width: 1180px; margin: 0 auto; padding: 24px 16px 48px; }
-  header { display: flex; flex-wrap: wrap; align-items: baseline; gap: 8px 16px; margin-bottom: 20px; }
-  h1 { font-size: 22px; margin: 0; }
-  h2 { font-size: 14px; font-weight: 600; margin: 0 0 12px; }
-  .muted { color: var(--muted); }
-  .kpis { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 12px; margin-bottom: 16px; }
-  .kpi, .card { background: var(--card); border: 1px solid var(--line); border-radius: 10px; }
-  .kpi { padding: 14px 16px; }
-  .kpi b { display: block; font-size: 26px; font-variant-numeric: tabular-nums; }
-  .range { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 12px; margin: 8px 0 12px; }
-  .range h2 { margin: 0; }
-  .range input, .range select, .range button, .range a { font: inherit; color: var(--text); background: var(--card);
-         border: 1px solid var(--line); border-radius: 6px; padding: 4px 8px; text-decoration: none; }
-  .range button { cursor: pointer; }
-  .range a.on { border-color: var(--c1); color: var(--c1); }
-  .grid { display: grid; grid-template-columns: repeat(6, minmax(0, 1fr)); gap: 16px; }
-  .card { padding: 16px; min-width: 0; grid-column: span 2; }
-  .wide { grid-column: span 6; }
-  .half { grid-column: span 3; }
-  @media (max-width: 760px) { .card, .half { grid-column: span 6; } }
-  .legend { display: flex; gap: 14px; flex-wrap: wrap; margin: -4px 0 8px; font-size: 12px; color: var(--muted); }
-  .legend i { display: inline-block; width: 10px; height: 10px; border-radius: 2px; margin-right: 5px; vertical-align: -1px; }
-  .chart { position: relative; }
-  svg { display: block; width: 100%; height: auto; overflow: visible; }
-  svg text { fill: var(--muted); font-size: 11px; }
-  .tip { position: absolute; pointer-events: none; background: var(--card); border: 1px solid var(--line);
-         border-radius: 6px; padding: 6px 8px; font-size: 12px; white-space: nowrap; display: none;
-         box-shadow: 0 2px 8px rgba(0,0,0,.12); }
-  table { width: 100%; border-collapse: collapse; font-variant-numeric: tabular-nums; }
-  th, td { text-align: right; padding: 5px 8px; border-bottom: 1px solid var(--line); }
-  th:first-child, td:first-child { text-align: left; }
-  th { font-weight: 600; color: var(--muted); font-size: 12px; }
-  .scroll { max-height: 360px; overflow: auto; }
-  .card > div:not(.legend) { overflow-x: auto; }
-  .bar { height: 8px; border-radius: 4px; background: var(--c1); }
-  .empty { color: var(--muted); padding: 24px 0; text-align: center; }
-  .cohorts { border-collapse: separate; border-spacing: 3px; }
-  .cohorts th, .cohorts td { border: 0; padding: 0; }
-  .cohorts th { padding: 0 0 6px; text-align: center; font-weight: 400; }
-  .cohorts .all td { padding: 8px 0; text-align: center; border-bottom: 1px solid var(--line); }
-  .cohorts .who { text-align: left !important; padding: 0 12px 0 0; white-space: nowrap; }
-  .cohorts .cell { min-width: 44px; height: 30px; border-radius: 2px; }
-  .foot { margin-top: 12px; font-size: 12px; }
-</style>
-</head>
-<body>
-<main>
-  <header>
-    <h1>YMusic Analytics</h1>
-  </header>
-  <section class="kpis" id="kpis"></section>
-  <form class="range" method="get">
-    <h2>Range</h2>
-    <select name="os" id="os" onchange="this.form.submit()"></select>
-    <input type="date" name="from" id="from" required> – <input type="date" name="to" id="to" required>
-    <button>Apply</button>
-    <span id="presets"></span>
-  </form>
-  <section class="kpis" id="period"></section>
-  <section class="grid">
-    <div class="card wide"><h2>Active devices</h2><div id="active"></div></div>
-    <div class="card half"><h2>New devices per day</h2><div id="new"></div></div>
-    <div class="card half"><h2>App launches per day</h2><div id="launches"></div></div>
-    <div class="card half"><h2>User retention</h2><div id="curve"></div><div class="foot muted" id="curveFoot"></div></div>
-    <div class="card half"><h2>User activity by cohort</h2><div id="cohorts"></div><div class="foot muted" id="cohortFoot"></div></div>
-    <div class="card"><h2>Platforms <span class="muted">· active in range</span></h2><div id="platforms"></div></div>
-    <div class="card"><h2>App versions <span class="muted">· active in range</span></h2><div id="versions"></div></div>
-    <div class="card"><h2>Countries <span class="muted">· active in range</span></h2><div id="countries"></div></div>
-  </section>
-</main>
-<script>
-const DATA = /*DATA*/null;
+let DATA;
 const fmt = (n) => n == null ? '—' : n.toLocaleString('en-US');
 const pct = (n, of) => n == null || !of ? '—' : (100 * n / of).toFixed(1) + '%';
 const el = (tag, attrs = {}, text) => {
@@ -102,30 +9,6 @@ const el = (tag, attrs = {}, text) => {
 };
 const esc = (s) => String(s).replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
 
-
-const s = DATA.summary;
-document.getElementById('kpis').innerHTML = [
-  ['Active today', s.dau], ['Active 7 days', s.wau], ['Active 30 days', s.mau],
-  ['New today', s.new_today], ['Launches today', s.launches_today], ['Devices ever', s.devices],
-].map(([label, value]) => `<div class="kpi"><span class="muted">${label}</span><b>${fmt(value)}</b></div>`).join('');
-
-const p = DATA.period;
-const span = (Date.parse(p.to) - Date.parse(p.from)) / 86400000 + 1;
-document.getElementById('from').value = p.from;
-document.getElementById('to').value = p.to;
-const osSelect = document.getElementById('os');
-osSelect.innerHTML = '<option value="">All platforms</option>' +
-  DATA.oses.map((os) => `<option${os === DATA.os ? ' selected' : ''}>${esc(os)}</option>`).join('');
-const osParam = DATA.os ? `&os=${encodeURIComponent(DATA.os)}` : '';
-const before = (days) => new Date(Date.parse(s.today) - (days - 1) * 86400000).toISOString().slice(0, 10);
-document.getElementById('presets').innerHTML = [[7, '7d'], [30, '30d'], [90, '90d'], [365, '1y']].map(([days, label]) => {
-  const on = p.to === s.today && p.from === before(days) ? ' class="on"' : '';
-  return `<a${on} href="?from=${before(days)}&to=${s.today}${osParam}">${label}</a>`;
-}).join(' ');
-document.getElementById('period').innerHTML = [
-  [`Active ${p.from} – ${p.to}${p.active == null ? ' · ranges ending today only' : ''}`, p.active], ['New in range', p.new_devices], ['Launches in range', p.launches],
-  ['Days', span],
-].map(([label, value]) => `<div class="kpi"><span class="muted">${label}</span><b>${fmt(value)}</b></div>`).join('');
 
 // A day-indexed line/bar chart with a hover readout. series: [{key, label, color, type}]
 function timeChart(target, rows, series, height = 220) {
@@ -289,18 +172,98 @@ timeChart('active', DATA.daily, [
 timeChart('new', DATA.daily, [{ key: 'new_devices', label: 'New devices', color: '--c3', type: 'bar' }]);
 timeChart('launches', DATA.daily, [{ key: 'launches', label: 'Launches', color: '--c4', type: 'bar' }]);
 }
-drawCharts();
-let resizeTimer;
-addEventListener('resize', () => { clearTimeout(resizeTimer); resizeTimer = setTimeout(drawCharts, 150); });
+function render() {
+  const summary = DATA.summary;
+  document.getElementById('kpis').innerHTML = [
+    ['Active today', summary.dau], ['Active 7 days', summary.wau], ['Active 30 days', summary.mau],
+    ['New today', summary.new_today], ['Launches today', summary.launches_today], ['Devices ever', summary.devices],
+  ].map(([label, value]) => `<div class="kpi"><span class="muted">${label}</span><b>${fmt(value)}</b></div>`).join('');
 
-cohortGrid('cohorts', DATA.retention.cohorts);
-document.getElementById('curveFoot').textContent =
-  `Last ${DATA.retention.daily.length} days ending ${shortDay(DATA.retention.end)}`;
-document.getElementById('cohortFoot').textContent =
-  `${DATA.retention.cohorts.length} weeks ending ${shortDay(DATA.retention.end)}`;
-shares('platforms', DATA.platforms, (r) => r.os || '—');
-shares('versions', DATA.versions, (r) => `${r.os || '—'} ${r.version}`);
-shares('countries', DATA.countries, (r) => r.country);
-</script>
-</body>
-</html>
+  const period = DATA.period;
+  const span = (Date.parse(period.to) - Date.parse(period.from)) / 86400000 + 1;
+  document.getElementById('from').value = period.from;
+  document.getElementById('to').value = period.to;
+  const osSelect = document.getElementById('os');
+  osSelect.innerHTML = '<option value="">All platforms</option>' +
+    DATA.oses.map((os) => `<option${os === DATA.os ? ' selected' : ''}>${esc(os)}</option>`).join('');
+  const osParam = DATA.os ? `&os=${encodeURIComponent(DATA.os)}` : '';
+  const before = (days) => new Date(Date.parse(summary.today) - (days - 1) * 86400000).toISOString().slice(0, 10);
+  document.getElementById('presets').innerHTML = [[7, '7d'], [30, '30d'], [90, '90d'], [365, '1y']].map(([days, label]) => {
+    const on = period.to === summary.today && period.from === before(days) ? ' class="on"' : '';
+    return `<a${on} href="?from=${before(days)}&to=${summary.today}${osParam}">${label}</a>`;
+  }).join(' ');
+  document.getElementById('period').innerHTML = [
+    [`Active ${period.from} – ${period.to}${period.active == null ? ' · ranges ending today only' : ''}`, period.active], ['New in range', period.new_devices], ['Launches in range', period.launches],
+    ['Days', span],
+  ].map(([label, value]) => `<div class="kpi"><span class="muted">${label}</span><b>${fmt(value)}</b></div>`).join('');
+
+  drawCharts();
+
+  cohortGrid('cohorts', DATA.retention.cohorts);
+  document.getElementById('curveFoot').textContent =
+    `Last ${DATA.retention.daily.length} days ending ${shortDay(DATA.retention.end)}`;
+  document.getElementById('cohortFoot').textContent =
+    `${DATA.retention.cohorts.length} weeks ending ${shortDay(DATA.retention.end)}`;
+  shares('platforms', DATA.platforms, (r) => r.os || '—');
+  shares('versions', DATA.versions, (r) => `${r.os || '—'} ${r.version}`);
+  shares('countries', DATA.countries, (r) => r.country);
+}
+
+// The query string is the state: ?from=&to=&os=, as the API takes it.
+async function load() {
+  const error = document.getElementById('error');
+  let res;
+  try {
+    // From origin, not relative: a page opened as user:pass@host would pass the credentials on,
+    // and fetch refuses a URL that carries them.
+    res = await fetch(new URL('/api/analytics' + location.search, location.origin));
+  } catch (failure) {
+    error.textContent = `Could not load analytics: ${failure.message}`;
+    error.hidden = false;
+    return;
+  }
+  if (!res.ok) {
+    const body = await res.json().catch(() => ({}));
+    error.textContent = `Could not load analytics: ${body.error ?? body.message ?? res.status}`;
+    error.hidden = false;
+    return;
+  }
+  error.hidden = true;
+  DATA = await res.json();
+  render();
+}
+
+function navigate(search) {
+  history.pushState(null, '', search + location.hash);
+  load();
+}
+
+const form = document.getElementById('range');
+form.addEventListener('submit', (ev) => {
+  ev.preventDefault();
+  const params = new URLSearchParams();
+  for (const [key, value] of new FormData(form)) if (value) params.set(key, value);
+  navigate('?' + params);
+});
+document.getElementById('os').addEventListener('change', () => form.requestSubmit());
+document.getElementById('presets').addEventListener('click', (ev) => {
+  const link = ev.target.closest('a');
+  if (!link) return;
+  ev.preventDefault();
+  navigate(link.getAttribute('href'));
+});
+addEventListener('popstate', load);
+
+function showView() {
+  const view = location.hash === '#config' ? 'config' : 'analytics';
+  for (const name of ['analytics', 'config']) document.getElementById('view-' + name).hidden = name !== view;
+  for (const link of document.querySelectorAll('nav a')) link.classList.toggle('on', link.dataset.view === view);
+  if (view === 'analytics' && DATA) drawCharts();
+}
+addEventListener('hashchange', showView);
+
+let resizeTimer;
+addEventListener('resize', () => { clearTimeout(resizeTimer); resizeTimer = setTimeout(() => DATA && drawCharts(), 150); });
+
+showView();
+load();

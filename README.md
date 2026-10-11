@@ -92,6 +92,9 @@ src/routes/link.ts      the QR sign-in relay (store: src/links.ts)
 src/routes/index.ts     the list every route is registered from
 src/server.ts           builds the fastify instance
 src/index.ts            reads env, listens
+src/stats.ts            nightly analytics rollups
+src/dashboard/          the private dashboard server: Basic Auth, /api/analytics
+dashboard/              its frontend (index.html + app.js), served as-is
 ```
 
 Adding an endpoint is a file in `src/routes/` and a line in `src/routes/index.ts`. Listed explicitly
@@ -125,5 +128,22 @@ npm run build && npm start      # dist/
 npm test
 ```
 
-`PORT` (8787), `HOST` (0.0.0.0), `LOG_LEVEL` (info). `trustProxy` is on, so terminate TLS at the
-proxy.
+`PORT` (8787), `HOST` (0.0.0.0), `LOG_LEVEL` (info). `YM_TLS_CERT` + `YM_TLS_KEY` serve HTTPS
+(the self-signed `tls/api.ymix.io.*` origin cert); without them it is plain HTTP. `trustProxy` is on.
+
+## Dashboard
+
+A second server, private behind Basic Auth: analytics now, app config later. The frontend
+(`dashboard/`) fetches `GET /api/analytics?from=&to=&os=` and renders it.
+
+```bash
+npm run dev:dashboard           # node --env-file=dashboard.env, via tsx
+npm run build && npm run start:dashboard
+```
+
+| Env | |
+| --- | --- |
+| `DASHBOARD_USER`, `DASHBOARD_PASSWORD` | Basic Auth; required |
+| `DASHBOARD_PG` | DSN, the `ymusic_readonly` role; required. `YM_PG_CA/CERT/KEY` as the API |
+| `DASHBOARD_HOST`, `DASHBOARD_PORT` | `127.0.0.1`, `8790` |
+| `DASHBOARD_TLS_CERT`, `DASHBOARD_TLS_KEY` | HTTPS (`tls/dashboard.ymix.io.*`); plain HTTP without |
