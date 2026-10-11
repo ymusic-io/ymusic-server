@@ -54,18 +54,23 @@ CREATE TABLE IF NOT EXISTS devices (
   app_version integer NOT NULL,
   country     text,
   created_at  timestamptz NOT NULL,
-  updated_at  timestamptz NOT NULL
+  updated_at  timestamptz NOT NULL,
+  last_active date
 );
+-- Rewritten once per active day per device; the slack keeps those updates in-page (HOT).
+ALTER TABLE devices SET (fillfactor = 90);
+-- The two high-volume tables are partitioned by month (PARTITIONS creates them), so old months
+-- drop as whole tables.
 CREATE TABLE IF NOT EXISTS daily_activity (
   day       date NOT NULL,
   device_id uuid NOT NULL,
   PRIMARY KEY (day, device_id)
-);
+) PARTITION BY RANGE (day);
 CREATE TABLE IF NOT EXISTS event_app_start (
   device_id   uuid NOT NULL,
   at          timestamptz NOT NULL,
   received_at timestamptz NOT NULL DEFAULT now()
-);
+) PARTITION BY RANGE (at);
 CREATE INDEX IF NOT EXISTS event_app_start_at ON event_app_start (at);
 CREATE TABLE IF NOT EXISTS event_app_update (
   device_id    uuid NOT NULL,
@@ -86,6 +91,58 @@ CREATE TABLE IF NOT EXISTS device_links (
 CREATE INDEX IF NOT EXISTS device_links_expires_at ON device_links (expires_at);
 ALTER TABLE devices ADD COLUMN IF NOT EXISTS os_version text;
 ALTER TABLE event_app_update ADD COLUMN IF NOT EXISTS os text;
+ALTER TABLE devices ADD COLUMN IF NOT EXISTS last_active date;
+CREATE INDEX IF NOT EXISTS devices_created_at ON devices (created_at);
+CREATE INDEX IF NOT EXISTS devices_last_active ON devices (last_active);
+
+-- Nightly rollups (stats.ts) — the dashboard reads these, never the raw tables' history.
+-- os is the device's current platform.
+CREATE TABLE IF NOT EXISTS stats_day (
+  day         date NOT NULL,
+  os          text NOT NULL,
+  dau         integer NOT NULL,
+  wau         integer NOT NULL,
+  mau         integer NOT NULL,
+  new_devices integer NOT NULL,
+  launches    integer NOT NULL,
+  PRIMARY KEY (day, os)
+);
+-- Devices first seen on first_day that were active n days later.
+CREATE TABLE IF NOT EXISTS stats_retention (
+  first_day date NOT NULL,
+  os        text NOT NULL,
+  n         integer NOT NULL,
+  active    integer NOT NULL,
+  PRIMARY KEY (first_day, os, n)
+);
+-- Devices first seen on first_day that were active in days [7 * week, 7 * week + 6] after it.
+CREATE TABLE IF NOT EXISTS stats_retention_week (
+  first_day date NOT NULL,
+  os        text NOT NULL,
+  week      integer NOT NULL,
+  active    integer NOT NULL,
+  PRIMARY KEY (first_day, os, week)
+);
+`
+
+/**
+ * Monthly partitions from three months back (events up to 60 days old are accepted) to next
+ * month; runs at boot and nightly so the next month always exists before it starts. Bounds are
+ * in the DB's timezone, the analytics day.
+ */
+export const PARTITIONS = `
+DO $$
+DECLARE m date;
+BEGIN
+  FOR m IN SELECT generate_series(date_trunc('month', current_date) - interval '3 months',
+                                  date_trunc('month', current_date) + interval '1 month',
+                                  interval '1 month')::date LOOP
+    EXECUTE format('CREATE TABLE IF NOT EXISTS %I PARTITION OF daily_activity FOR VALUES FROM (%L) TO (%L)',
+                   'daily_activity_' || to_char(m, 'YYYY_MM'), m, (m + interval '1 month')::date);
+    EXECUTE format('CREATE TABLE IF NOT EXISTS %I PARTITION OF event_app_start FOR VALUES FROM (%L) TO (%L)',
+                   'event_app_start_' || to_char(m, 'YYYY_MM'), m::timestamptz, (m + interval '1 month')::date::timestamptz);
+  END LOOP;
+END $$;
 `
 
 /** [dsn] should be the ymusic_server role; the cert files come from the private DB CA. */
@@ -117,7 +174,18 @@ export async function openPool(settings: PgSettings): Promise<pg.Pool> {
     options: '-c search_path=app',
     max: 5,
   })
-  await pool.query(MIGRATION)
+  // Every pm2 instance boots at once; concurrent CREATE ... IF NOT EXISTS can still collide.
+  const client = await pool.connect()
+  try {
+    await client.query(`SELECT pg_advisory_lock(hashtext('ymusic-migration'))`)
+    await client.query(MIGRATION)
+    await client.query(PARTITIONS)
+    await client.query(`SELECT pg_advisory_unlock(hashtext('ymusic-migration'))`)
+    client.release()
+  } catch (error) {
+    client.release(true) // closing the session drops the lock
+    throw error
+  }
   return pool
 }
 
@@ -155,17 +223,19 @@ export class Analytics {
       return `$${params.length}`
     }
 
+    const lastActive = input.days.length > 0 ? input.days.reduce((a, b) => (a > b ? a : b)) : null
     const ctes: string[] = []
     if (input.days.length > 0 || input.refreshDevice) {
       ctes.push(
         `dev AS (
-           INSERT INTO devices (id, os, os_version, app_version, country, created_at, updated_at)
-           VALUES (${bind(input.deviceId)}, ${bind(input.os)}, ${bind(input.osVersion)}, ${bind(input.appVersion)}, ${bind(input.country)}, now(), now())
+           INSERT INTO devices (id, os, os_version, app_version, country, last_active, created_at, updated_at)
+           VALUES (${bind(input.deviceId)}, ${bind(input.os)}, ${bind(input.osVersion)}, ${bind(input.appVersion)}, ${bind(input.country)}, ${bind(lastActive)}::date, now(), now())
            ON CONFLICT (id) DO UPDATE SET
              os = EXCLUDED.os,
              os_version = EXCLUDED.os_version,
              app_version = EXCLUDED.app_version,
              country = COALESCE(EXCLUDED.country, devices.country),
+             last_active = GREATEST(devices.last_active, EXCLUDED.last_active),
              updated_at = now())`,
       )
     }
