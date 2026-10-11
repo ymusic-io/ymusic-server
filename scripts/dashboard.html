@@ -50,6 +50,14 @@
   .card > div:not(.legend) { overflow-x: auto; }
   .bar { height: 8px; border-radius: 4px; background: var(--c1); }
   .empty { color: var(--muted); padding: 24px 0; text-align: center; }
+  .cohorts { border-collapse: separate; border-spacing: 3px; }
+  .cohorts th, .cohorts td { border: 0; padding: 0; }
+  .cohorts th { padding: 0 0 4px; text-align: center; }
+  .cohorts th:first-child { text-align: left; }
+  .cohorts .who { text-align: left; padding: 6px 12px 6px 0; white-space: nowrap; }
+  .cohorts .who small { display: block; color: var(--muted); font-size: 12px; }
+  .cohorts .cell { min-width: 64px; height: 44px; text-align: center; border-radius: 4px; font-size: 13px; }
+  .cohorts .all .who { font-weight: 600; }
 </style>
 </head>
 <body>
@@ -63,7 +71,7 @@
     <div class="card wide"><h2>Active devices</h2><div id="active"></div></div>
     <div class="card half"><h2>New devices per day</h2><div id="new"></div></div>
     <div class="card half"><h2>App launches per day</h2><div id="launches"></div></div>
-    <div class="card wide"><h2>Retention by first-seen day</h2><div class="scroll" id="retention"></div></div>
+    <div class="card wide"><h2>User retention <span class="muted">· weekly cohorts by first seen</span></h2><div id="retention"></div></div>
     <div class="card"><h2>Platforms <span class="muted">· active 30 days</span></h2><div id="platforms"></div></div>
     <div class="card"><h2>App versions <span class="muted">· active 30 days</span></h2><div id="versions"></div></div>
     <div class="card"><h2>Countries <span class="muted">· active 30 days</span></h2><div id="countries"></div></div>
@@ -82,7 +90,7 @@ const el = (tag, attrs = {}, text) => {
 const esc = (s) => String(s).replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
 
 document.getElementById('stamp').textContent =
-  `Generated ${new Date(DATA.generatedAt).toLocaleString()} · today = ${DATA.summary.today} (+07)`;
+  `Updated ${new Date(DATA.generatedAt).toLocaleTimeString()} · reload for fresh numbers · today = ${DATA.summary.today} (+07)`;
 
 const s = DATA.summary;
 document.getElementById('kpis').innerHTML = [
@@ -98,15 +106,18 @@ function timeChart(target, rows, series, height = 220) {
       series.map((sr) => `<span><i style="background:var(${sr.color})"></i>${sr.label}</span>`).join('') + '</div>');
   }
   const W = Math.max(280, box.clientWidth), H = height, L = 44, R = 8, T = 8, B = 22;
-  const max = Math.max(1, ...rows.flatMap((r) => series.map((sr) => r[sr.key])));
-  const nice = (() => { const p = 10 ** Math.floor(Math.log10(max)); return Math.ceil(max / p) * p; })();
+  // Four gridline steps of 1/2/5 × 10^k, so every label is a round integer.
+  const max = Math.max(4, ...rows.flatMap((r) => series.map((sr) => r[sr.key])));
+  const raw = max / 4, mag = 10 ** Math.floor(Math.log10(raw));
+  const tick = [1, 2, 5, 10].map((m) => m * mag).find((t) => t >= raw);
+  const nice = tick * 4;
   const x = (i) => L + (rows.length <= 1 ? 0 : i * (W - L - R) / (rows.length - 1));
   const y = (v) => T + (H - T - B) * (1 - v / nice);
   const svg = el('svg', { viewBox: `0 0 ${W} ${H}`, role: 'img' });
   for (let k = 0; k <= 4; k++) {
     const v = nice * k / 4;
     svg.append(el('line', { svg: 1, x1: L, x2: W - R, y1: y(v), y2: y(v), stroke: 'var(--line)' }));
-    svg.append(el('text', { svg: 1, x: L - 6, y: y(v) + 4, 'text-anchor': 'end' }, fmt(Math.round(v))));
+    svg.append(el('text', { svg: 1, x: L - 6, y: y(v) + 4, 'text-anchor': 'end' }, fmt(v)));
   }
   const step = Math.max(1, Math.ceil(rows.length / Math.max(2, Math.floor(W / 90))));
   rows.forEach((r, i) => {
@@ -157,6 +168,35 @@ function table(target, head, body) {
     body.map((cells) => '<tr>' + cells.map((c) => `<td>${c}</td>`).join('') + '</tr>').join('') + '</tbody></table>';
 }
 
+// Firebase-style cohort grid: shade = share of the cohort active in that week.
+function cohortGrid(target, cohorts) {
+  const box = document.getElementById(target);
+  if (!cohorts.length) { box.innerHTML = '<div class="empty">No data yet</div>'; return; }
+  const weeks = cohorts[0].weeks.length;
+  const day = (iso, plus = 0) => new Date(Date.parse(iso + 'T00:00:00Z') + plus * 86400000)
+    .toLocaleDateString('en-US', { month: 'short', day: 'numeric', timeZone: 'UTC' });
+  const cell = (n, of) => {
+    if (n == null) return '<td class="cell"></td>';
+    const share = of ? n / of : 0;
+    const ink = share > 0.45 ? '#fff' : 'var(--text)';
+    return `<td class="cell" style="background:color-mix(in srgb, var(--c1) ${Math.round(8 + 92 * share)}%, transparent);color:${ink}"` +
+      ` title="${fmt(n)} of ${fmt(of)}">${(100 * share).toFixed(1)}%</td>`;
+  };
+  // All users: each week averaged over the cohorts that have reached it, weighted by size.
+  const all = Array.from({ length: weeks }, (_, w) => {
+    const reached = cohorts.filter((c) => c.weeks[w] != null);
+    return reached.length ? [reached.reduce((a, c) => a + c.weeks[w], 0), reached.reduce((a, c) => a + c.size, 0)] : null;
+  });
+  const total = cohorts.reduce((a, c) => a + c.size, 0);
+  box.innerHTML = '<table class="cohorts"><thead><tr><th></th>' +
+    Array.from({ length: weeks }, (_, w) => `<th>Week ${w}</th>`).join('') + '</tr></thead><tbody>' +
+    `<tr class="all"><td class="who">All users<small>${day(cohorts.at(-1).cohort)} – ${day(cohorts[0].cohort, 6)} · ${fmt(total)} devices</small></td>` +
+    all.map((a) => a ? cell(a[0], a[1]) : cell(null)).join('') + '</tr>' +
+    cohorts.map((c) => `<tr><td class="who">${day(c.cohort)} – ${day(c.cohort, 6)}<small>${fmt(c.size)} devices</small></td>` +
+      c.weeks.map((n) => cell(n, c.size)).join('') + '</tr>').join('') +
+    '</tbody></table>';
+}
+
 // label, count, share bar — for the 30-day breakdowns.
 function shares(target, rows, label) {
   const total = rows.reduce((sum, r) => sum + r.devices, 0);
@@ -179,8 +219,7 @@ drawCharts();
 let resizeTimer;
 addEventListener('resize', () => { clearTimeout(resizeTimer); resizeTimer = setTimeout(drawCharts, 150); });
 
-table('retention', ['First seen', 'Devices', 'Day 1', 'Day 7', 'Day 30'],
-  DATA.retention.map((r) => [r.cohort, fmt(r.size), pct(r.d1, r.size), pct(r.d7, r.size), pct(r.d30, r.size)]));
+cohortGrid('retention', DATA.retention);
 shares('platforms', DATA.platforms, (r) => r.os || '—');
 shares('versions', DATA.versions, (r) => `${r.os || '—'} ${r.version}`);
 shares('countries', DATA.countries, (r) => r.country);
