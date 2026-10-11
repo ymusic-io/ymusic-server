@@ -4,8 +4,8 @@
 //   YM_UPDATE_SIGNING_KEY=<base64 PKCS#8 P-256 key> \
 //     node scripts/sign-app-update.mjs <platform> <versionCode> <versionName> <installer> <public url> [notes file]
 //
-// <platform> is a RELEASES key: android (universal), android-<abi>, macos-arm64, macos-x64, windows-x64, linux-x64.
-// Prints the entry for src/routes/config.ts. The signature is ECDSA P-256 / SHA-256 (DER, base64)
+// <platform> is a `releases` key: android (universal), android-<abi>, macos-arm64, macos-x64, windows-x64, linux-x64.
+// Prints the entry for `releases` in the dashboard's App config. The signature is ECDSA P-256 / SHA-256 (DER, base64)
 // over "app-<platform>:<versionCode>:<sha256 hex of the installer>" — what the desktop app rebuilds
 // from the bytes it downloads. This key is the UPDATE key, not the JS bundle key.
 

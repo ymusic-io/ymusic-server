@@ -4,7 +4,7 @@
 //   YM_BUNDLE_SIGNING_KEY=<base64 PKCS#8 P-256 key> \
 //     node scripts/sign-bundle.mjs <engine|player> <version> <bundle file> <public url>
 //
-// Prints the {version, url, signature} entry for src/routes/config.ts. The signature is ECDSA
+// Prints the {version, url, signature} entry for engineJs / playerJs in the dashboard's App config. The signature is ECDSA
 // P-256 / SHA-256 (DER, base64) over "<name>:<version>:<sha256 hex of the file>" — exactly what the
 // app's verifyBundleSignature rebuilds from the bytes it downloads.
 

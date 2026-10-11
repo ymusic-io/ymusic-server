@@ -1,5 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
-import { RELEASES, type AppRelease } from '../src/routes/config.js'
+import { type AppConfig, type AppRelease, DEFAULT_APP_CONFIG } from '../src/appConfig.js'
+import { StaticConfig } from '../src/configStore.js'
 import { buildServer } from '../src/server.js'
 
 let app: Awaited<ReturnType<typeof buildServer>>
@@ -23,18 +24,19 @@ function get(os?: string, appVer?: string, arch?: string, deviceId = 'abc') {
   return app.inject({ url: '/v1/config', headers })
 }
 
-const published = { ...RELEASES }
+/** The served config; a test may publish more releases into it before asking. */
+let config: AppConfig
 
 beforeEach(async () => {
-  RELEASES['windows-x64'] = release(1234, 'https://x/ymusic-1234.msi')
-  RELEASES['macos-arm64'] = release(1234, 'https://x/ymusic-1234-arm64.dmg')
-  RELEASES.android = release(1234, 'https://x/ymusic-1234.apk')
-  app = await buildServer()
+  config = structuredClone(DEFAULT_APP_CONFIG)
+  config.releases['windows-x64'] = release(1234, 'https://x/ymusic-1234.msi')
+  config.releases['macos-arm64'] = release(1234, 'https://x/ymusic-1234-arm64.dmg')
+  config.releases.android = release(1234, 'https://x/ymusic-1234.apk')
+  app = await buildServer({ config: new StaticConfig(config) })
   await app.ready()
 })
 
 afterEach(async () => {
-  Object.assign(RELEASES, published)
   await app.close()
 })
 
@@ -67,7 +69,7 @@ describe('GET /v1/config', () => {
   })
 
   it('offers android its split APK when published, else the universal one', async () => {
-    RELEASES['android-arm64-v8a'] = release(1234, 'https://x/ymusic-1234-arm64-v8a.apk')
+    config.releases['android-arm64-v8a'] = release(1234, 'https://x/ymusic-1234-arm64-v8a.apk')
     expect((await get('android', '1', 'arm64-v8a')).json().appUpdate.url).toContain('arm64-v8a')
     expect((await get('android', '1', 'x86_64')).json().appUpdate.url).toBe('https://x/ymusic-1234.apk')
     expect((await get('android', '1')).json().appUpdate.url).toBe('https://x/ymusic-1234.apk')

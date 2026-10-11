@@ -1,5 +1,6 @@
 import { readFileSync } from 'node:fs'
 import pg from 'pg'
+import { DEFAULT_APP_CONFIG } from './appConfig.js'
 
 /**
  * The event allowlist and per-event handlers — the ONLY door to a table. An entry says which
@@ -115,6 +116,15 @@ CREATE TABLE IF NOT EXISTS stats_retention (
   active    integer NOT NULL,
   PRIMARY KEY (first_day, os, n)
 );
+-- What /v1/config answers from, append-only: the newest row is live, a revert appends a copy.
+CREATE TABLE IF NOT EXISTS app_config (
+  id            bigserial PRIMARY KEY,
+  config        jsonb NOT NULL,
+  note          text,
+  author        text,
+  created_at    timestamptz NOT NULL DEFAULT now(),
+  reverted_from bigint REFERENCES app_config (id)
+);
 -- Devices first seen on first_day that were active in days [7 * week, 7 * week + 6] after it.
 CREATE TABLE IF NOT EXISTS stats_retention_week (
   first_day date NOT NULL,
@@ -187,6 +197,11 @@ export async function openPool(settings: PgSettings): Promise<pg.Pool> {
     await client.query(`SELECT pg_advisory_lock(hashtext('ymusic-migration'))`)
     await client.query(MIGRATION)
     await client.query(PARTITIONS)
+    await client.query(
+      `INSERT INTO app_config (config, note, author)
+       SELECT $1, 'initial: the rules that were hardcoded', 'server' WHERE NOT EXISTS (SELECT 1 FROM app_config)`,
+      [JSON.stringify(DEFAULT_APP_CONFIG)],
+    )
     await client.query(`SELECT pg_advisory_unlock(hashtext('ymusic-migration'))`)
     client.release()
   } catch (error) {
