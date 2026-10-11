@@ -21,10 +21,8 @@ for f in .env tls/ca.crt tls/client-local.crt tls/client-local.key; do
   fi
 done
 
-# Dev deps are the compiler; dropped again once dist/ is built.
-npm ci --include=dev
+npm ci --omit=dev
 npm run build
-npm prune --omit=dev
 
 appName=remote-config
 
