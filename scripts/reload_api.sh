@@ -24,7 +24,7 @@ done
 npm ci --omit=dev
 npm run build
 
-appName=remote-config
+appName=ymusic-server
 
 pm2 describe $appName >/dev/null && RUNNING=0 || RUNNING=1
 

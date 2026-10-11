@@ -1,4 +1,4 @@
-# ymusic-remote-config
+# ymusic-server
 
 Fastify server with one endpoint: the config YMusic asks for at startup.
 

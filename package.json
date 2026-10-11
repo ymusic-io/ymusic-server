@@ -1,5 +1,5 @@
 {
-  "name": "ymusic-remote-config",
+  "name": "ymusic-server",
   "version": "1.0.0",
   "private": true,
   "description": "Remote config endpoint for YMusic: feature flags and update availability.",
@@ -13,8 +13,8 @@
     "dev": "tsx watch src/index.ts",
     "test": "vitest run",
     "typecheck": "tsc -p tsconfig.json --noEmit",
-    "dev:local": "node --env-file=.env --import tsx src/index.ts",
-    "test:live": "node --env-file=.env node_modules/.bin/vitest run test/ingest.test.ts"
+    "dev:local": "node --env-file=dev.env --import tsx src/index.ts",
+    "test:local": "node --env-file=dev.env node_modules/.bin/vitest run test/ingest.test.ts"
   },
   "dependencies": {
     "@fastify/cookie": "^11.1.2",
