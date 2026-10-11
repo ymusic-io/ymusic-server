@@ -87,30 +87,48 @@ async function collect(from, to) {
     [from, to],
   )
 
-  // Weekly cohorts (Monday-start week of first seen), Firebase-style: week N of a device is days
-  // [7N, 7N+6] after ITS first day. A week is null until the cohort's first day could reach it.
+  // Firebase-style retention, ending yesterday (today is still partial). Devices are grouped by
+  // their first day; day N / week N of a device count from ITS first day, and only devices whose
+  // day N has already ended are counted for it.
+  const [{ end }] = await rows(`SELECT (current_date - 1)::text AS "end"`)
+  const RETENTION_DAYS = 42
+  const retentionDaily = await rows(
+    `WITH c AS (SELECT id, date(created_at) AS first FROM devices
+                WHERE date(created_at) BETWEEN $1::date - ($2::int - 1) AND $1::date)
+     SELECT n AS day,
+            (SELECT count(*) FROM c WHERE c.first + n <= $1::date)::int AS eligible,
+            (SELECT count(*) FROM c WHERE c.first + n <= $1::date
+               AND EXISTS (SELECT 1 FROM daily_activity a WHERE a.device_id = c.id AND a.day = c.first + n))::int AS active
+     FROM generate_series(0, $2::int - 1) n`,
+    [end, RETENTION_DAYS],
+  )
+
+  // Cohort k (0 = newest) is the 7 days ending 7k days before the end.
   const COHORT_WEEKS = 6
   const cohortRows = await rows(
     `WITH c AS (
-       SELECT id, date(created_at) AS first, date_trunc('week', date(created_at))::date AS cohort
-       FROM devices WHERE date(created_at) >= date_trunc('week', current_date)::date - 7 * ($1::int - 1)
+       SELECT id, date(created_at) AS first, ($1::date - date(created_at)) / 7 AS k
+       FROM devices WHERE date(created_at) BETWEEN $1::date - (7 * $2::int - 1) AND $1::date
      )
-     SELECT c.cohort::text AS cohort, -1 AS week, count(*)::int AS devices FROM c GROUP BY c.cohort
+     SELECT c.k, -1 AS week, count(*)::int AS devices FROM c GROUP BY c.k
      UNION ALL
-     SELECT c.cohort::text, ((a.day - c.first) / 7)::int, count(DISTINCT a.device_id)::int
-     FROM c JOIN daily_activity a ON a.device_id = c.id AND a.day >= c.first AND a.day < c.first + 7 * $1::int
+     SELECT c.k, ((a.day - c.first) / 7)::int, count(DISTINCT a.device_id)::int
+     FROM c JOIN daily_activity a ON a.device_id = c.id AND a.day >= c.first AND a.day <= $1::date
+       AND a.day < c.first + 7 * $2::int
      GROUP BY 1, 2`,
-    [COHORT_WEEKS],
+    [end, COHORT_WEEKS],
   )
-  const retention = [...new Set(cohortRows.map((r) => r.cohort))].sort().reverse().map((cohort) => {
-    const size = cohortRows.find((r) => r.cohort === cohort && r.week === -1)?.devices ?? 0
-    const start = new Date(`${cohort}T00:00:00Z`)
-    const weeks = Array.from({ length: COHORT_WEEKS }, (_, week) => {
-      const reachable = new Date(start.getTime() + week * 7 * 86400000).toISOString().slice(0, 10) <= summary.today
-      return reachable ? (cohortRows.find((r) => r.cohort === cohort && r.week === week)?.devices ?? 0) : null
-    })
-    return { cohort, size, weeks }
+  const endMs = dayMs(end)
+  const isoDay = (ms) => new Date(ms).toISOString().slice(0, 10)
+  const cohorts = Array.from({ length: COHORT_WEEKS }, (_, k) => {
+    const startMs = endMs - (7 * k + 6) * DAY_MS
+    const size = cohortRows.find((r) => r.k === k && r.week === -1)?.devices ?? 0
+    const weeks = Array.from({ length: COHORT_WEEKS }, (_, week) =>
+      startMs + week * 7 * DAY_MS <= endMs ? (cohortRows.find((r) => r.k === k && r.week === week)?.devices ?? 0) : null,
+    )
+    return { from: isoDay(startMs), to: isoDay(startMs + 6 * DAY_MS), size, weeks }
   })
+  const retention = { end, daily: retentionDaily, cohorts }
 
   // Breakdowns over devices active in the range.
   const active = `id IN (SELECT device_id FROM daily_activity WHERE day BETWEEN $1::date AND $2::date)`

@@ -58,12 +58,11 @@
   .empty { color: var(--muted); padding: 24px 0; text-align: center; }
   .cohorts { border-collapse: separate; border-spacing: 3px; }
   .cohorts th, .cohorts td { border: 0; padding: 0; }
-  .cohorts th { padding: 0 0 4px; text-align: center; }
-  .cohorts th:first-child { text-align: left; }
-  .cohorts .who { text-align: left; padding: 6px 12px 6px 0; white-space: nowrap; }
-  .cohorts .who small { display: block; color: var(--muted); font-size: 12px; }
-  .cohorts .cell { min-width: 64px; height: 44px; text-align: center; border-radius: 4px; font-size: 13px; }
-  .cohorts .all .who { font-weight: 600; }
+  .cohorts th { padding: 0 0 6px; text-align: center; font-weight: 400; }
+  .cohorts .all td { padding: 8px 0; text-align: center; border-bottom: 1px solid var(--line); }
+  .cohorts .who { text-align: left !important; padding: 0 12px 0 0; white-space: nowrap; }
+  .cohorts .cell { min-width: 44px; height: 30px; border-radius: 2px; }
+  .foot { margin-top: 12px; font-size: 12px; }
 </style>
 </head>
 <body>
@@ -84,7 +83,8 @@
     <div class="card wide"><h2>Active devices</h2><div id="active"></div></div>
     <div class="card half"><h2>New devices per day</h2><div id="new"></div></div>
     <div class="card half"><h2>App launches per day</h2><div id="launches"></div></div>
-    <div class="card wide"><h2>User retention <span class="muted">· weekly cohorts by first seen</span></h2><div id="retention"></div></div>
+    <div class="card half"><h2>User retention</h2><div id="curve"></div><div class="foot muted" id="curveFoot"></div></div>
+    <div class="card half"><h2>User activity by cohort</h2><div id="cohorts"></div><div class="foot muted" id="cohortFoot"></div></div>
     <div class="card"><h2>Platforms <span class="muted">· active in range</span></h2><div id="platforms"></div></div>
     <div class="card"><h2>App versions <span class="muted">· active in range</span></h2><div id="versions"></div></div>
     <div class="card"><h2>Countries <span class="muted">· active in range</span></h2><div id="countries"></div></div>
@@ -195,32 +195,71 @@ function table(target, head, body) {
     body.map((cells) => '<tr>' + cells.map((c) => `<td>${c}</td>`).join('') + '</tr>').join('') + '</tbody></table>';
 }
 
-// Firebase-style cohort grid: shade = share of the cohort active in that week.
+const shortDay = (iso) => new Date(Date.parse(iso + 'T00:00:00Z'))
+  .toLocaleDateString('en-US', { month: 'short', day: 'numeric', timeZone: 'UTC' });
+
+// Firebase "User retention": share of devices active on day N after their first day.
+function retentionCurve(target, days) {
+  const box = document.getElementById(target);
+  const points = days.filter((d) => d.eligible > 0);
+  if (!points.length) { box.innerHTML = '<div class="empty">No data yet</div>'; return; }
+  const W = Math.max(280, box.clientWidth), H = 240, L = 16, R = 48, T = 8, B = 34;
+  const last = days.length - 1;
+  const x = (n) => L + n * (W - L - R) / last;
+  const y = (share) => T + (H - T - B) * (1 - share);
+  const svg = el('svg', { viewBox: `0 0 ${W} ${H}`, role: 'img' });
+  for (let k = 0; k <= 5; k++) {
+    svg.append(el('line', { svg: 1, x1: L, x2: W - R, y1: y(k / 5), y2: y(k / 5), stroke: 'var(--line)' }));
+    svg.append(el('text', { svg: 1, x: W - R + 6, y: y(k / 5) + 4 }, `${k * 20}.0%`));
+  }
+  for (let n = 0; n <= last; n += 7) {
+    svg.append(el('text', { svg: 1, x: x(n), y: H - 18, 'text-anchor': 'middle' }, 'Day'));
+    svg.append(el('text', { svg: 1, x: x(n), y: H - 4, 'text-anchor': 'middle' }, n));
+  }
+  const share = (d) => d.active / d.eligible;
+  svg.append(el('path', { svg: 1, fill: 'none', stroke: 'var(--c1)', 'stroke-width': 2, 'stroke-linejoin': 'round',
+    d: points.map((d, i) => `${i ? 'L' : 'M'}${x(d.day).toFixed(1)},${y(share(d)).toFixed(1)}`).join('') }));
+  const cursor = el('line', { svg: 1, y1: T, y2: H - B, stroke: 'var(--muted)', 'stroke-dasharray': '3 3', visibility: 'hidden' });
+  svg.append(cursor);
+  const wrap = el('div', { class: 'chart' });
+  const tip = el('div', { class: 'tip' });
+  wrap.append(svg, tip);
+  box.append(wrap);
+  svg.addEventListener('pointermove', (ev) => {
+    const rect = svg.getBoundingClientRect();
+    const n = Math.round(((ev.clientX - rect.left) * W / rect.width - L) / ((W - L - R) / last));
+    const d = points.find((p) => p.day === Math.min(points.at(-1).day, Math.max(0, n)));
+    cursor.setAttribute('x1', x(d.day)); cursor.setAttribute('x2', x(d.day)); cursor.setAttribute('visibility', 'visible');
+    tip.innerHTML = `<b>Day ${d.day}</b><br>${pct(d.active, d.eligible)} · ${fmt(d.active)} of ${fmt(d.eligible)} devices`;
+    tip.style.display = 'block';
+    tip.style.left = Math.min(x(d.day) * rect.width / W + 12, rect.width - tip.offsetWidth) + 'px';
+    tip.style.top = '8px';
+  });
+  svg.addEventListener('pointerleave', () => { tip.style.display = 'none'; cursor.setAttribute('visibility', 'hidden'); });
+}
+
+// Firebase "User activity by cohort": shade = share of the cohort active in that week; hover for numbers.
 function cohortGrid(target, cohorts) {
   const box = document.getElementById(target);
-  if (!cohorts.length) { box.innerHTML = '<div class="empty">No data yet</div>'; return; }
+  if (!cohorts.some((c) => c.size)) { box.innerHTML = '<div class="empty">No data yet</div>'; return; }
   const weeks = cohorts[0].weeks.length;
-  const day = (iso, plus = 0) => new Date(Date.parse(iso + 'T00:00:00Z') + plus * 86400000)
-    .toLocaleDateString('en-US', { month: 'short', day: 'numeric', timeZone: 'UTC' });
-  const cell = (n, of) => {
-    if (n == null) return '<td class="cell"></td>';
-    const share = of ? n / of : 0;
-    const ink = share > 0.45 ? '#fff' : 'var(--text)';
-    return `<td class="cell" style="background:color-mix(in srgb, var(--c1) ${Math.round(8 + 92 * share)}%, transparent);color:${ink}"` +
-      ` title="${fmt(n)} of ${fmt(of)}">${(100 * share).toFixed(1)}%</td>`;
+  const cell = (c, w) => {
+    const n = c.weeks[w];
+    if (n == null || !c.size) return '<td class="cell"></td>';
+    const share = n / c.size;
+    return `<td class="cell" style="background:color-mix(in srgb, var(--c1) ${Math.round(15 + 85 * share)}%, transparent)"` +
+      ` title="${shortDay(c.from)} – ${shortDay(c.to)}, week ${w}: ${pct(n, c.size)} (${fmt(n)} of ${fmt(c.size)})"></td>`;
   };
   // All users: each week averaged over the cohorts that have reached it, weighted by size.
   const all = Array.from({ length: weeks }, (_, w) => {
     const reached = cohorts.filter((c) => c.weeks[w] != null);
-    return reached.length ? [reached.reduce((a, c) => a + c.weeks[w], 0), reached.reduce((a, c) => a + c.size, 0)] : null;
+    return pct(reached.reduce((a, c) => a + c.weeks[w], 0), reached.reduce((a, c) => a + c.size, 0));
   });
-  const total = cohorts.reduce((a, c) => a + c.size, 0);
   box.innerHTML = '<table class="cohorts"><thead><tr><th></th>' +
     Array.from({ length: weeks }, (_, w) => `<th>Week ${w}</th>`).join('') + '</tr></thead><tbody>' +
-    `<tr class="all"><td class="who">All users<small>${day(cohorts.at(-1).cohort)} – ${day(cohorts[0].cohort, 6)} · ${fmt(total)} devices</small></td>` +
-    all.map((a) => a ? cell(a[0], a[1]) : cell(null)).join('') + '</tr>' +
-    cohorts.map((c) => `<tr><td class="who">${day(c.cohort)} – ${day(c.cohort, 6)}<small>${fmt(c.size)} devices</small></td>` +
-      c.weeks.map((n) => cell(n, c.size)).join('') + '</tr>').join('') +
+    '<tr class="all"><td class="who">All users</td>' + all.map((a) => `<td>${a}</td>`).join('') + '</tr>' +
+    [...cohorts].reverse().map((c) => `<tr><td class="who" title="${fmt(c.size)} devices">${shortDay(c.from)} – ${shortDay(c.to)}</td>` +
+      c.weeks.map((_, w) => cell(c, w)).join('') + '</tr>').join('') +
     '</tbody></table>';
 }
 
@@ -234,7 +273,8 @@ function shares(target, rows, label) {
 }
 
 function drawCharts() {
-  for (const id of ['active', 'new', 'launches']) document.getElementById(id).replaceChildren();
+  for (const id of ['active', 'new', 'launches', 'curve']) document.getElementById(id).replaceChildren();
+retentionCurve('curve', DATA.retention.daily);
 timeChart('active', DATA.daily, [
   { key: 'mau', label: 'Active 30 days', color: '--c2' },
   { key: 'wau', label: 'Active 7 days', color: '--c3' },
@@ -247,7 +287,11 @@ drawCharts();
 let resizeTimer;
 addEventListener('resize', () => { clearTimeout(resizeTimer); resizeTimer = setTimeout(drawCharts, 150); });
 
-cohortGrid('retention', DATA.retention);
+cohortGrid('cohorts', DATA.retention.cohorts);
+document.getElementById('curveFoot').textContent =
+  `Last ${DATA.retention.daily.length} days ending ${shortDay(DATA.retention.end)}`;
+document.getElementById('cohortFoot').textContent =
+  `${DATA.retention.cohorts.length} weeks ending ${shortDay(DATA.retention.end)}`;
 shares('platforms', DATA.platforms, (r) => r.os || '—');
 shares('versions', DATA.versions, (r) => `${r.os || '—'} ${r.version}`);
 shares('countries', DATA.countries, (r) => r.country);
