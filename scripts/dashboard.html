@@ -94,7 +94,7 @@ document.getElementById('stamp').textContent =
 
 const s = DATA.summary;
 document.getElementById('kpis').innerHTML = [
-  ['Active today', s.dau], ['Active 7 days', s.wau], ['Active 30 days', s.mau],
+  ['Active today', s.dau], ['Active 7 days', s.wau], ['Active 30 days', s.mau], ['Active 90 days', s.active90],
   ['New today', s.new_today], ['Launches today', s.launches_today], ['Devices ever', s.devices],
 ].map(([label, value]) => `<div class="kpi"><span class="muted">${label}</span><b>${fmt(value)}</b></div>`).join('');
 

@@ -40,6 +40,7 @@ async function collect() {
            (SELECT count(*) FROM daily_activity WHERE day = current_date)::int AS dau,
            (SELECT count(DISTINCT device_id) FROM daily_activity WHERE day > current_date - 7)::int AS wau,
            (SELECT count(DISTINCT device_id) FROM daily_activity WHERE day > current_date - 30)::int AS mau,
+           (SELECT count(DISTINCT device_id) FROM daily_activity WHERE day > current_date - 90)::int AS active90,
            (SELECT count(*) FROM devices WHERE date(created_at) = current_date)::int AS new_today,
            (SELECT count(*) FROM event_app_start WHERE date(at) = current_date)::int AS launches_today`)
 
