@@ -258,8 +258,6 @@ addEventListener('popstate', load);
 const VIEWS = { '/': 'home', '/analytics': 'analytics', '/config': 'config' };
 const view = VIEWS[location.pathname] ?? 'home';
 for (const name of Object.values(VIEWS)) document.getElementById('view-' + name).hidden = name !== view;
-document.querySelector('nav').hidden = view === 'home';
-for (const link of document.querySelectorAll('nav a')) link.classList.toggle('on', link.dataset.view === view);
 
 let resizeTimer;
 addEventListener('resize', () => { clearTimeout(resizeTimer); resizeTimer = setTimeout(() => DATA && drawCharts(), 150); });
