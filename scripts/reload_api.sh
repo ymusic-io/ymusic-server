@@ -31,17 +31,22 @@ if [[ $1 == "force" ]]; then
   cmd="restart"
 fi
 
-# name, entry, instances
+# name, entry, extra pm2 start args
 deploy() {
-  if pm2 describe "$1" >/dev/null; then
-    pm2 $cmd "$1" --update-env
+  local name=$1 entry=$2
+  shift 2
+  if pm2 describe "$name" >/dev/null; then
+    pm2 $cmd "$name" --update-env
   else
-    pm2 start "$2" -i "$3" --time --name="$1" --node-args="--env-file=.env" \
+    pm2 start "$entry" "$@" --time --name="$name" --node-args="--env-file=.env" \
       --listen-timeout 15000 --kill-timeout 15000 --no-pmx
   fi
 }
 
-deploy ymusic-server dist/index.js 2
-deploy ymusic-dashboard dist/dashboard/index.js 1
+# The API runs in cluster mode (-i). The dashboard runs in fork mode (no -i) on purpose: pm2's
+# cluster master shares one socket per port across ALL cluster apps, so a dashboard in cluster mode
+# on the API's port silently joins its round-robin instead of failing with EADDRINUSE.
+deploy ymusic-server dist/index.js -i 2
+deploy ymusic-dashboard dist/dashboard/index.js
 
 pm2 save
