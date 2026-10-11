@@ -24,6 +24,26 @@
   header { display: flex; flex-wrap: wrap; align-items: baseline; gap: 8px 16px; margin-bottom: 20px; }
   h1 a { color: inherit; text-decoration: none; }
   .features { display: grid; grid-template-columns: repeat(auto-fit, minmax(260px, 1fr)); gap: 16px; }
+  .stack > * + * { margin-top: 16px; }
+  .stack .card { grid-column: auto; }
+  textarea { width: 100%; min-height: 420px; resize: vertical; font: 13px/1.5 ui-monospace, SFMono-Regular, Menlo, monospace;
+             color: var(--text); background: var(--bg); border: 1px solid var(--line); border-radius: 8px; padding: 12px; }
+  .actions { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin-top: 10px; }
+  .actions input { flex: 1 1 240px; }
+  .actions input, .actions button, .history button { font: inherit; color: var(--text); background: var(--card);
+         border: 1px solid var(--line); border-radius: 6px; padding: 5px 10px; }
+  .actions button, .history button { cursor: pointer; }
+  .actions button.primary { border-color: var(--c1); color: var(--c1); }
+  .history button.armed { border-color: var(--c2); color: var(--c2); }
+  .msg.ok { color: var(--c3); }
+  .msg.bad { color: var(--c2); white-space: pre-line; }
+  .badge { font-size: 11px; color: var(--c3); border: 1px solid var(--c3); border-radius: 4px; padding: 0 4px; margin-left: 4px; }
+  .history th, .history td { text-align: left; vertical-align: top; }
+  .history td:last-child { white-space: nowrap; text-align: right; }
+  .diff { margin: 0; font: 12px/1.5 ui-monospace, SFMono-Regular, Menlo, monospace; overflow-x: auto; }
+  .diff span { display: block; white-space: pre; padding: 0 6px; }
+  .diff .add { background: color-mix(in srgb, var(--c3) 22%, transparent); }
+  .diff .del { background: color-mix(in srgb, var(--c2) 22%, transparent); }
   .card.feature { display: block; grid-column: auto; padding: 20px; color: inherit; text-decoration: none; }
   .feature:hover { border-color: var(--c1); }
   .feature h2 { font-size: 16px; margin-bottom: 6px; }
@@ -82,7 +102,7 @@
   <div id="view-home" hidden>
     <section class="features">
       <a class="card feature" href="/analytics"><h2>Analytics</h2><p class="muted">Active devices, retention, versions, platforms and countries.</p></a>
-      <a class="card feature" href="/config"><h2>App config</h2><p class="muted">Feature flags and update availability. Not implemented yet.</p></a>
+      <a class="card feature" href="/config"><h2>App config</h2><p class="muted">Feature flags, app updates and JS bundles, with history and revert.</p></a>
     </section>
   </div>
   <div id="view-analytics" hidden>
@@ -106,8 +126,19 @@
     <div class="card"><h2>Countries <span class="muted">· active in range</span></h2><div id="countries"></div></div>
   </section>
   </div>
-  <div id="view-config" hidden>
-    <div class="card"><h2>App config</h2><p class="muted">Not implemented yet. Feature flags and update availability will be edited here.</p></div>
+  <div id="view-config" class="stack" hidden>
+    <div class="card">
+      <h2>Live config <span class="muted" id="liveMeta"></span></h2>
+      <textarea id="configText" spellcheck="false"></textarea>
+      <div class="actions">
+        <input id="configNote" placeholder="What changed (optional)">
+        <button id="configDiffEdit">Diff my edit</button>
+        <button id="configSave" class="primary">Save as new version</button>
+      </div>
+      <div class="msg" id="configMsg"></div>
+    </div>
+    <div class="card" id="diffCard" hidden><h2 id="diffTitle"></h2><pre class="diff" id="diffBody"></pre></div>
+    <div class="card"><h2>History <span class="muted">· newest first; the API picks up the live version within a minute</span></h2><div id="history"></div></div>
   </div>
 </main>
 <script src="/app.js"></script>

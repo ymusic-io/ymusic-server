@@ -22,7 +22,8 @@ export function loadDashboardConfig(env: NodeJS.ProcessEnv = process.env): Dashb
     // Loopback unless told otherwise: the dashboard is private.
     host: env.DASHBOARD_HOST ?? '127.0.0.1',
     port,
-    // The ymusic_readonly DSN; the DB cert files are shared with the API server's.
+    // The ymusic_server DSN: the dashboard appends app_config versions. The DB cert files are
+    // shared with the API server's.
     pg: { dsn: required('DASHBOARD_PG'), caFile: env.YM_PG_CA, certFile: env.YM_PG_CERT, keyFile: env.YM_PG_KEY },
     user: required('DASHBOARD_USER'),
     password: required('DASHBOARD_PASSWORD'),

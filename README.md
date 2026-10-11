@@ -1,6 +1,7 @@
 # ymusic-server
 
-Fastify server with one endpoint: the config YMusic asks for at startup.
+Fastify server with one endpoint: the config YMusic asks for at startup. Its rules live in the
+database (`app_config`) and are edited in the [dashboard](#dashboard).
 
 ```
 GET /v1/config      x-os: windows, x-arch: x64, x-app-ver: 1233, x-device-id: …
@@ -46,8 +47,8 @@ YM_BUNDLE_SIGNING_KEY=<base64 PKCS#8 P-256 key> \
   node scripts/sign-bundle.mjs engine 69 path/to/engine.js https://cfg.ymusic.io/static/engine-69.js
 ```
 
-Upload the file to that url, then paste the printed `{version, url, signature}` into `ENGINE_JS` /
-`PLAYER_JS` in [`src/routes/config.ts`](src/routes/config.ts). The signature covers
+Upload the file to that url, then paste the printed `{version, url, signature}` into `engineJs` /
+`playerJs` in the dashboard's App config and save. The signature covers
 `<name>:<version>:<sha256 of the file>`, so a file cannot be re-published under another version or
 as the other bundle without signing it again.
 
@@ -64,7 +65,7 @@ YM_UPDATE_SIGNING_KEY=<base64 PKCS#8 P-256 key> \
 ```
 
 Upload the installer to that url, then paste the printed entry into its platform's slot in
-`RELEASES` in [`src/routes/config.ts`](src/routes/config.ts). The signature covers
+`releases` in the dashboard's App config and save. The signature covers
 `app-<platform>:<versionCode>:<sha256 of the installer>`.
 
 ## QR sign-in relay
@@ -86,7 +87,9 @@ database these routes answer 503.
 ## Layout
 
 ```
-src/routes/config.ts    GET /v1/config — the rules and the handler
+src/routes/config.ts    GET /v1/config
+src/appConfig.ts        the config document: shape, defaults, validation, per-caller answer
+src/configStore.ts      app_config versions, and the API's in-memory copy
 src/routes/health.ts    GET /healthz
 src/routes/link.ts      the QR sign-in relay (store: src/links.ts)
 src/routes/index.ts     the list every route is registered from
@@ -104,9 +107,9 @@ quietly without that route.
 
 ## Editing the rules
 
-They are in [`src/routes/config.ts`](src/routes/config.ts), beside the handler that serves them —
-A release is one entry in the `RELEASES` table, offered to every build of that platform below its
-`versionCode`.
+They are data, edited in the dashboard's App config (shape: [`src/appConfig.ts`](src/appConfig.ts)).
+`flags` go to every caller, `flagsByOs.<os>` overrides them for one platform. A release is one entry
+in `releases`, offered to every build of that platform below its `versionCode`.
 
 `x-os` is a coarse platform name (`windows`, `android`, …) and `x-arch` the desktop CPU (`x64`,
 `arm64`), both matched lower-case. `x-app-ver` is the caller's build number; a missing or unparseable one falls back to `-1`, which is older than every release, so
@@ -133,8 +136,16 @@ npm test
 
 ## Dashboard
 
-A second server, private behind Basic Auth: analytics now, app config later. The frontend
-(`dashboard/`) fetches `GET /api/analytics?from=&to=&os=` and renders it.
+A second server, private behind Basic Auth. The frontend (`dashboard/`) calls its JSON API:
+
+- **Analytics** — `GET /api/analytics?from=&to=&os=`.
+- **App config** — what `/v1/config` answers from (flags, per-OS flag overrides, releases, JS
+  bundles; see `src/appConfig.ts`). `app_config` is append-only: saving appends a version, the
+  newest is live, and a revert appends a copy of an old one, so every change can be diffed and
+  undone. A save names the version it started from and is refused (409) if another landed in
+  between. The API keeps the live config in memory and refreshes it in the background once it is
+  a minute old, so a change reaches every API process within about a minute. An empty table is
+  seeded once with the defaults.
 
 ```bash
 npm run dev:dashboard           # node --env-file=dashboard.env, via tsx
@@ -144,6 +155,6 @@ npm run build && npm run start:dashboard
 | Env | |
 | --- | --- |
 | `DASHBOARD_USER`, `DASHBOARD_PASSWORD` | Basic Auth; required |
-| `DASHBOARD_PG` | DSN, the `ymusic_readonly` role; required. `YM_PG_CA/CERT/KEY` as the API |
+| `DASHBOARD_PG` | DSN, the `ymusic_server` role (it writes `app_config`); required. `YM_PG_CA/CERT/KEY` as the API |
 | `DASHBOARD_HOST`, `DASHBOARD_PORT` | `127.0.0.1`, `8790` |
 | `DASHBOARD_TLS_CERT`, `DASHBOARD_TLS_KEY` | HTTPS (`tls/dashboard.ymix.io.*`); plain HTTP without |

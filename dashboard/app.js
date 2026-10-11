@@ -254,6 +254,153 @@ document.getElementById('presets').addEventListener('click', (ev) => {
 });
 addEventListener('popstate', load);
 
+// ---- App config: append-only versions, the newest is live ----
+
+async function api(path, options = {}) {
+  const res = await fetch(new URL(path, location.origin), options);
+  const body = await res.json().catch(() => ({}));
+  if (!res.ok) throw Object.assign(new Error(body.error ?? `HTTP ${res.status}`), { status: res.status, body });
+  return body;
+}
+const postJson = (path, body) => api(path, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(body) });
+
+let configState; // { live, history }
+const configBodies = new Map(); // version id → config
+// Postgres stores jsonb keys in its own order; show the top level in the documented one.
+const KEY_ORDER = ['flags', 'flagsByOs', 'releases', 'engineJs', 'playerJs'];
+const pretty = (config) => JSON.stringify(
+  Object.fromEntries(Object.entries(config).sort(([a], [b]) => KEY_ORDER.indexOf(a) - KEY_ORDER.indexOf(b))), null, 2);
+const when = (iso) => new Date(iso.replace(' ', 'T').replace(/([+-]\d\d)$/, '$1:00')).toLocaleString();
+
+function configMessage(text, ok) {
+  const box = document.getElementById('configMsg');
+  box.textContent = text;
+  box.className = 'msg ' + (ok ? 'ok' : 'bad');
+}
+
+async function loadConfig() {
+  try {
+    configState = await api('/api/config');
+  } catch (failure) {
+    configMessage(`Could not load the config: ${failure.message}`, false);
+    return;
+  }
+  const { live, history } = configState;
+  configBodies.set(live.id, live.config);
+  document.getElementById('liveMeta').textContent =
+    `· v${live.id} · ${when(live.created_at)}${live.author ? ' · ' + live.author : ''}`;
+  document.getElementById('configText').value = pretty(live.config);
+  renderHistory();
+}
+
+function renderHistory() {
+  const { live, history } = configState;
+  table('history', ['Version', 'Saved', 'By', 'Note', ''], history.map((v, i) => [
+    `v${v.id}${v.id === live.id ? '<span class="badge">live</span>' : ''}`,
+    esc(when(v.created_at)),
+    esc(v.author ?? '—'),
+    esc(v.note ?? '') + (v.reverted_from ? ` <span class="muted">(restores v${v.reverted_from})</span>` : ''),
+    `<button data-diff="${v.id}" data-prev="${history[i + 1]?.id ?? ''}">Diff</button>` +
+      (v.id === live.id ? '' : ` <button data-revert="${v.id}">Revert to v${v.id}</button>`),
+  ]));
+  document.querySelector('#history table')?.classList.add('history');
+}
+
+async function versionConfig(id) {
+  if (!configBodies.has(id)) configBodies.set(id, (await api(`/api/config/${id}`)).config);
+  return configBodies.get(id);
+}
+
+// Line diff of the pretty-printed JSON (LCS; configs are small).
+function lineDiff(before, after) {
+  const a = before.split('\n'), b = after.split('\n');
+  const lcs = Array.from({ length: a.length + 1 }, () => new Array(b.length + 1).fill(0));
+  for (let i = a.length - 1; i >= 0; i--) for (let j = b.length - 1; j >= 0; j--) {
+    lcs[i][j] = a[i] === b[j] ? lcs[i + 1][j + 1] + 1 : Math.max(lcs[i + 1][j], lcs[i][j + 1]);
+  }
+  const lines = [];
+  let i = 0, j = 0;
+  while (i < a.length || j < b.length) {
+    if (i < a.length && j < b.length && a[i] === b[j]) { lines.push([' ', a[i]]); i++; j++; }
+    else if (i < a.length && (j === b.length || lcs[i + 1][j] >= lcs[i][j + 1])) lines.push(['-', a[i++]]);
+    else lines.push(['+', b[j++]]);
+  }
+  return lines;
+}
+
+function showDiff(title, before, after) {
+  const lines = lineDiff(before, after);
+  document.getElementById('diffTitle').textContent = title;
+  document.getElementById('diffBody').innerHTML = lines.some(([kind]) => kind !== ' ')
+    ? lines.map(([kind, text]) => `<span class="${kind === '+' ? 'add' : kind === '-' ? 'del' : ''}">${kind} ${esc(text)}</span>`).join('')
+    : '<span class="muted">No differences.</span>';
+  const card = document.getElementById('diffCard');
+  card.hidden = false;
+  card.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+}
+
+function editedConfig() {
+  try {
+    return JSON.parse(document.getElementById('configText').value);
+  } catch (failure) {
+    configMessage(`Not valid JSON: ${failure.message}`, false);
+    return undefined;
+  }
+}
+
+document.getElementById('configDiffEdit').addEventListener('click', () => {
+  const edited = editedConfig();
+  if (edited === undefined) return;
+  configMessage('', true);
+  showDiff(`Your edit vs live v${configState.live.id}`, pretty(configState.live.config), pretty(edited));
+});
+
+document.getElementById('configSave').addEventListener('click', async () => {
+  const edited = editedConfig();
+  if (edited === undefined) return;
+  const note = document.getElementById('configNote').value;
+  try {
+    const saved = await postJson('/api/config', { config: edited, note, baseId: configState.live.id });
+    document.getElementById('configNote').value = '';
+    document.getElementById('diffCard').hidden = true;
+    await loadConfig();
+    configMessage(`Saved as v${saved.id}. The API serves it within a minute.`, true);
+  } catch (failure) {
+    const details = failure.body?.errors ? '\n• ' + failure.body.errors.join('\n• ') : '';
+    const hint = failure.status === 409 ? '\nReload the page to see the newer version; your edit is still in the box.' : '';
+    configMessage(`Not saved: ${failure.message}${details}${hint}`, false);
+  }
+});
+
+document.getElementById('history').addEventListener('click', async (ev) => {
+  const button = ev.target.closest('button');
+  if (!button) return;
+  try {
+    if (button.dataset.diff) {
+      const id = Number(button.dataset.diff), prev = button.dataset.prev ? Number(button.dataset.prev) : null;
+      const after = pretty(await versionConfig(id));
+      const before = prev ? pretty(await versionConfig(prev)) : '';
+      showDiff(prev ? `v${prev} → v${id}` : `v${id} (first version)`, before, after);
+      return;
+    }
+    // Revert takes two clicks: the first arms the button, the second appends the old version.
+    if (!button.classList.contains('armed')) {
+      for (const other of document.querySelectorAll('#history button.armed')) {
+        other.classList.remove('armed');
+        other.textContent = `Revert to v${other.dataset.revert}`;
+      }
+      button.classList.add('armed');
+      button.textContent = `Confirm revert to v${button.dataset.revert}`;
+      return;
+    }
+    const saved = await postJson(`/api/config/${button.dataset.revert}/revert`, { baseId: configState.live.id });
+    await loadConfig();
+    configMessage(`Reverted: v${saved.id} restores v${saved.reverted_from}. The API serves it within a minute.`, true);
+  } catch (failure) {
+    configMessage(`${failure.message}${failure.status === 409 ? ' — reload the page.' : ''}`, false);
+  }
+});
+
 // One page for every path; the path picks the view.
 const VIEWS = { '/': 'home', '/analytics': 'analytics', '/config': 'config' };
 const view = VIEWS[location.pathname] ?? 'home';
@@ -263,3 +410,4 @@ let resizeTimer;
 addEventListener('resize', () => { clearTimeout(resizeTimer); resizeTimer = setTimeout(() => DATA && drawCharts(), 150); });
 
 if (view === 'analytics') load();
+if (view === 'config') loadConfig();
