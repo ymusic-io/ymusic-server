@@ -3,7 +3,7 @@ import { readFile } from 'node:fs/promises'
 import Fastify, { type FastifyInstance, type FastifyReply } from 'fastify'
 import type pg from 'pg'
 import { type AppConfig, validateAppConfig } from '../appConfig.js'
-import { appendConfig, configHistory, configVersion, latestConfig, StaleBase } from '../configStore.js'
+import { appendConfig, configHistory, configVersion, latestConfig, revertConfig, StaleBase } from '../configStore.js'
 import { httpsOptions, type TlsFiles } from '../tls.js'
 import { analytics, BadQuery } from './analytics.js'
 
@@ -80,9 +80,9 @@ export async function buildDashboard(options: DashboardOptions): Promise<Fastify
     return version ?? reply.code(404).send({ error: `no config v${req.params.id}` })
   })
 
-  const append = async (reply: FastifyReply, entry: Parameters<typeof appendConfig>[1]) => {
+  const conflictAware = async <T>(reply: FastifyReply, write: () => Promise<T>) => {
     try {
-      return await appendConfig(options.pool, entry)
+      return await write()
     } catch (error) {
       if (error instanceof StaleBase) return reply.code(409).send({ error: error.message })
       throw error
@@ -94,29 +94,34 @@ export async function buildDashboard(options: DashboardOptions): Promise<Fastify
     const errors = validateAppConfig(config)
     if (typeof baseId !== 'number') errors.push('baseId (the live version the edit started from) is required')
     if (errors.length > 0) return reply.code(400).send({ error: 'invalid config', errors })
-    return append(reply, {
-      config: config as AppConfig,
-      note: typeof note === 'string' && note.trim() ? note.trim() : null,
-      author: req.user,
-      baseId: baseId as number,
-    })
+    return conflictAware(reply, () =>
+      appendConfig(options.pool, {
+        config: config as AppConfig,
+        note: typeof note === 'string' && note.trim() ? note.trim() : null,
+        author: req.user,
+        baseId: baseId as number,
+      }),
+    )
   })
 
   app.post<{ Params: { id: string }; Body: { note?: unknown; baseId?: unknown } }>(
     '/api/config/:id/revert',
     async (req, reply) => {
-      const id = versionId(req.params.id)
-      const target = id === null ? undefined : await configVersion(options.pool, id)
-      if (!target) return reply.code(404).send({ error: `no config v${req.params.id}` })
+      const targetId = versionId(req.params.id)
       const { note, baseId } = req.body ?? {}
       if (typeof baseId !== 'number') return reply.code(400).send({ error: 'baseId is required' })
-      return append(reply, {
-        config: target.config,
-        note: typeof note === 'string' && note.trim() ? note.trim() : `revert to v${target.id}`,
-        author: req.user,
-        baseId,
-        revertedFrom: target.id,
-      })
+      const reverted =
+        targetId === null
+          ? undefined
+          : await conflictAware(reply, () =>
+              revertConfig(options.pool, {
+                targetId,
+                note: typeof note === 'string' && note.trim() ? note.trim() : null,
+                author: req.user,
+                baseId,
+              }),
+            )
+      return reverted ?? reply.code(404).send({ error: `no config v${req.params.id}` })
     },
   )
 

@@ -39,33 +39,65 @@ export async function configHistory(pool: pg.Pool, limit: number): Promise<Omit<
 export class StaleBase extends Error {}
 
 /**
- * Appends a version — the only write app_config ever gets. [baseId] is the live version the editor
- * started from; anything newer in between is a conflicting edit, refused rather than overwritten.
- * Validate [config] first (validateAppConfig).
+ * Runs [insert] as the next version, under a lock, only while [baseId] — the live version the
+ * editor started from — is still the newest; anything newer is a conflicting edit, refused rather
+ * than overwritten. [insert] returns the row, or nothing to abort without writing.
  */
-export async function appendConfig(
+async function appendVersion(
   pool: pg.Pool,
-  entry: { config: AppConfig; note: string | null; author: string; baseId: number; revertedFrom?: number },
-): Promise<ConfigVersion> {
+  baseId: number,
+  insert: (client: pg.PoolClient) => Promise<ConfigVersion | undefined>,
+): Promise<ConfigVersion | undefined> {
   const client = await pool.connect()
   try {
     await client.query('BEGIN')
     await client.query(`SELECT pg_advisory_xact_lock(hashtext('ymusic-app-config'))`)
     const { rows } = await client.query<{ id: number }>(`SELECT max(id)::int AS id FROM app_config`)
-    if (rows[0]?.id !== entry.baseId) {
-      throw new StaleBase(`the live config is v${rows[0]?.id}, not v${entry.baseId}: someone saved in between`)
+    if (rows[0]?.id !== baseId) {
+      throw new StaleBase(`the live config is v${rows[0]?.id}, not v${baseId}: someone saved in between`)
     }
-    const inserted = await client.query<ConfigVersion>(
-      `INSERT INTO app_config (config, note, author, reverted_from) VALUES ($1, $2, $3, $4) RETURNING ${COLUMNS}`,
-      [JSON.stringify(entry.config), entry.note, entry.author, entry.revertedFrom ?? null],
-    )
-    await client.query('COMMIT')
+    const inserted = await insert(client)
+    await client.query(inserted ? 'COMMIT' : 'ROLLBACK')
     client.release()
-    return inserted.rows[0]!
+    return inserted
   } catch (error) {
     client.release(true) // closing the session rolls back
     throw error
   }
+}
+
+/** Appends an edited config as the next version. Validate it first (validateAppConfig). */
+export async function appendConfig(
+  pool: pg.Pool,
+  entry: { config: AppConfig; note: string | null; author: string; baseId: number },
+): Promise<ConfigVersion> {
+  const inserted = await appendVersion(pool, entry.baseId, async (client) => {
+    const { rows } = await client.query<ConfigVersion>(
+      `INSERT INTO app_config (config, note, author) VALUES ($1, $2, $3) RETURNING ${COLUMNS}`,
+      [JSON.stringify(entry.config), entry.note, entry.author],
+    )
+    return rows[0]
+  })
+  return inserted!
+}
+
+/**
+ * Appends a copy of version [targetId] as the next version — copied inside the database, so the
+ * stored config is restored byte for byte. Undefined when there is no such version.
+ */
+export async function revertConfig(
+  pool: pg.Pool,
+  entry: { targetId: number; note: string | null; author: string; baseId: number },
+): Promise<ConfigVersion | undefined> {
+  return appendVersion(pool, entry.baseId, async (client) => {
+    const { rows } = await client.query<ConfigVersion>(
+      `INSERT INTO app_config (config, note, author, reverted_from)
+       SELECT config, coalesce($2, 'revert to v' || id), $3, id FROM app_config WHERE id = $1
+       RETURNING ${COLUMNS}`,
+      [entry.targetId, entry.note, entry.author],
+    )
+    return rows[0]
+  })
 }
 
 /** Where /v1/config reads the live config from. */
