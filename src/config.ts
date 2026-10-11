@@ -1,10 +1,13 @@
 import type { PgSettings } from './db.js'
+import { type TlsFiles, tlsFiles } from './tls.js'
 
 export interface AppConfig {
   host: string
   port: number
   pg?: PgSettings | undefined
   cookieSecret?: string | undefined
+  /** Serve HTTPS with this cert (YM_TLS_CERT + YM_TLS_KEY); plain HTTP without. */
+  tls?: TlsFiles | undefined
 }
 
 export function loadConfig(env: NodeJS.ProcessEnv = process.env): AppConfig {
@@ -26,5 +29,6 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): AppConfig {
         }
       : undefined,
     cookieSecret: env.YM_COOKIE_SECRET,
+    tls: tlsFiles(env.YM_TLS_CERT, env.YM_TLS_KEY, 'YM_TLS'),
   }
 }

@@ -4,6 +4,7 @@ import { Analytics, openPool, type PgSettings } from './db.js'
 import { type LinkStore, PgLinkStore } from './links.js'
 import { routes } from './routes/index.js'
 import { scheduleRollup } from './stats.js'
+import { httpsOptions, type TlsFiles } from './tls.js'
 
 declare module 'fastify' {
   interface FastifyInstance {
@@ -23,6 +24,8 @@ export interface ServerOptions {
   links?: LinkStore | undefined
   /** Run the nightly dashboard rollups (stats.ts) against [pg]. Off in tests. */
   stats?: boolean | undefined
+  /** Serve HTTPS with this cert. */
+  tls?: TlsFiles | undefined
 }
 
 export async function buildServer(options: ServerOptions = {}): Promise<FastifyInstance> {
@@ -30,6 +33,7 @@ export async function buildServer(options: ServerOptions = {}): Promise<FastifyI
     logger: { level: process.env.LOG_LEVEL ?? 'info' },
     // Behind nginx/caddy in production; without this every client looks like 127.0.0.1 in the log.
     trustProxy: true,
+    ...httpsOptions(options.tls),
   })
 
   if (options.cookieSecret) await app.register(fastifyCookie, { secret: options.cookieSecret })
