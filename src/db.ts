@@ -173,6 +173,8 @@ export function createPool(settings: PgSettings, max: number): pg.Pool {
       : undefined,
     options: '-c search_path=app',
     max,
+    // An unreachable database fails the request instead of holding it (and shutdown) forever.
+    connectionTimeoutMillis: 10_000,
   })
 }
 
