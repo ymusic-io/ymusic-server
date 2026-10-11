@@ -5,10 +5,10 @@
 //
 // Reads YM_PG (+ YM_PG_CA / YM_PG_CERT / YM_PG_KEY) like the server; the ymusic_readonly role is
 // enough. The production DB listens on the droplet's private address only, so reach it through a
-// tunnel — the server cert is issued for localhost, which is what the tunnel end is:
+// tunnel; db.ymix.io (the cert's name) is pinned to 127.0.0.1 in this machine's /etc/hosts:
 //
 //   ssh -N -L 15432:<db-private-ip>:5432 root@<server-ip>
-//   YM_PG=postgres://ymusic_readonly:<pw>@localhost:15432/ymusic
+//   YM_PG=postgres://ymusic_readonly:<pw>@db.ymix.io:15432/ymusic
 //
 // Every day is the DB's own calendar day (+07), the same buckets the ingest writes.
 
