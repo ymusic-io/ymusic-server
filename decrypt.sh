@@ -37,5 +37,5 @@ fi
 
 umask 077
 tar -xf "$work/payload.tar" --no-same-owner
-chmod 644 tls/ca.crt tls/client-local.crt
+chmod 644 tls/ca.crt tls/client-local.crt tls/api.ymix.io.crt tls/dashboard.ymix.io.crt
 echo "restored ${files[*]}"

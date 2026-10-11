@@ -10,7 +10,8 @@
 set -euo pipefail
 cd "$(dirname "$0")"
 
-FILES=(.env tls/ca.crt tls/client-local.crt tls/client-local.key)
+FILES=(.env tls/ca.crt tls/client-local.crt tls/client-local.key
+  tls/api.ymix.io.crt tls/api.ymix.io.key tls/dashboard.ymix.io.crt tls/dashboard.ymix.io.key)
 OUT=secrets.enc
 ITER=1000000
 
