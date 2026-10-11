@@ -13,6 +13,7 @@
 //
 // Every day is the DB's own calendar day (+07), the same buckets the ingest writes.
 // ?from=YYYY-MM-DD&to=YYYY-MM-DD picks the charted range (inclusive); the last 90 days by default.
+// ?os=<platform> narrows every number to devices whose latest pulse came from that platform.
 
 import { readFileSync } from 'node:fs'
 import { createServer } from 'node:http'
@@ -38,8 +39,8 @@ const pool = new pg.Pool({
 })
 const rows = async (sql, params = []) => (await pool.query(sql, params)).rows
 
-// Returns [from, to] as validated ISO days, or throws a RangeError for the 400 page.
-async function range(params) {
+// Returns [from, to, os] validated, or throws a RangeError for the 400 page.
+async function range(params, oses) {
   const [today] = await rows(`SELECT current_date::text AS day`)
   let to = params.get('to') || today.day
   let from = params.get('from') || null
@@ -51,24 +52,34 @@ async function range(params) {
   if ((dayMs(to) - dayMs(from)) / DAY_MS >= MAX_DAYS) {
     throw new RangeError(`range is longer than ${MAX_DAYS} days`)
   }
-  return [from, to]
+  const os = params.get('os') || null
+  if (os != null && !oses.includes(os)) throw new RangeError(`unknown platform: ${os}`)
+  return [from, to, os]
 }
 
-async function collect(from, to) {
+async function collect(from, to, os, oses) {
+  // os is one of the stored values (checked by range), so inlining it as a literal is safe.
+  const only = os && `(SELECT id FROM devices WHERE os = '${os.replace(/'/g, "''")}')`
+  const dev = (alias = 'devices') => (only ? `(SELECT * FROM devices WHERE id IN ${only}) ${alias}` : `devices ${alias}`)
+  const act = (alias = 'daily_activity') =>
+    only ? `(SELECT * FROM daily_activity WHERE device_id IN ${only}) ${alias}` : `daily_activity ${alias}`
+  const starts = (alias = 'event_app_start') =>
+    only ? `(SELECT * FROM event_app_start WHERE device_id IN ${only}) ${alias}` : `event_app_start ${alias}`
+
   const [summary] = await rows(`
     SELECT current_date::text AS today,
-           (SELECT count(*) FROM devices)::int AS devices,
-           (SELECT count(*) FROM daily_activity WHERE day = current_date)::int AS dau,
-           (SELECT count(DISTINCT device_id) FROM daily_activity WHERE day > current_date - 7)::int AS wau,
-           (SELECT count(DISTINCT device_id) FROM daily_activity WHERE day > current_date - 30)::int AS mau,
-           (SELECT count(*) FROM devices WHERE date(created_at) = current_date)::int AS new_today,
-           (SELECT count(*) FROM event_app_start WHERE date(at) = current_date)::int AS launches_today`)
+           (SELECT count(*) FROM ${dev()})::int AS devices,
+           (SELECT count(*) FROM ${act()} WHERE day = current_date)::int AS dau,
+           (SELECT count(DISTINCT device_id) FROM ${act()} WHERE day > current_date - 7)::int AS wau,
+           (SELECT count(DISTINCT device_id) FROM ${act()} WHERE day > current_date - 30)::int AS mau,
+           (SELECT count(*) FROM ${dev()} WHERE date(created_at) = current_date)::int AS new_today,
+           (SELECT count(*) FROM ${starts()} WHERE date(at) = current_date)::int AS launches_today`)
 
   const [period] = await rows(
     `SELECT $1::text AS "from", $2::text AS "to",
-            (SELECT count(DISTINCT device_id) FROM daily_activity WHERE day BETWEEN $1::date AND $2::date)::int AS active,
-            (SELECT count(*) FROM devices WHERE date(created_at) BETWEEN $1::date AND $2::date)::int AS new_devices,
-            (SELECT count(*) FROM event_app_start WHERE date(at) BETWEEN $1::date AND $2::date)::int AS launches`,
+            (SELECT count(DISTINCT device_id) FROM ${act()} WHERE day BETWEEN $1::date AND $2::date)::int AS active,
+            (SELECT count(*) FROM ${dev()} WHERE date(created_at) BETWEEN $1::date AND $2::date)::int AS new_devices,
+            (SELECT count(*) FROM ${starts()} WHERE date(at) BETWEEN $1::date AND $2::date)::int AS launches`,
     [from, to],
   )
 
@@ -76,13 +87,13 @@ async function collect(from, to) {
   const daily = await rows(
     `WITH days AS (SELECT generate_series($1::date, $2::date, '1 day')::date AS day)
      SELECT d.day::text AS day,
-            (SELECT count(*) FROM daily_activity a WHERE a.day = d.day)::int AS dau,
-            (SELECT count(DISTINCT a.device_id) FROM daily_activity a
+            (SELECT count(*) FROM ${act('a')} WHERE a.day = d.day)::int AS dau,
+            (SELECT count(DISTINCT a.device_id) FROM ${act('a')}
               WHERE a.day > d.day - 7 AND a.day <= d.day)::int AS wau,
-            (SELECT count(DISTINCT a.device_id) FROM daily_activity a
+            (SELECT count(DISTINCT a.device_id) FROM ${act('a')}
               WHERE a.day > d.day - 30 AND a.day <= d.day)::int AS mau,
-            (SELECT count(*) FROM devices v WHERE date(v.created_at) = d.day)::int AS new_devices,
-            (SELECT count(*) FROM event_app_start e WHERE date(e.at) = d.day)::int AS launches
+            (SELECT count(*) FROM ${dev('v')} WHERE date(v.created_at) = d.day)::int AS new_devices,
+            (SELECT count(*) FROM ${starts('e')} WHERE date(e.at) = d.day)::int AS launches
      FROM days d ORDER BY d.day`,
     [from, to],
   )
@@ -93,12 +104,12 @@ async function collect(from, to) {
   const [{ end }] = await rows(`SELECT (current_date - 1)::text AS "end"`)
   const RETENTION_DAYS = 42
   const retentionDaily = await rows(
-    `WITH c AS (SELECT id, date(created_at) AS first FROM devices
+    `WITH c AS (SELECT id, date(created_at) AS first FROM ${dev()}
                 WHERE date(created_at) BETWEEN $1::date - ($2::int - 1) AND $1::date)
      SELECT n AS day,
             (SELECT count(*) FROM c WHERE c.first + n <= $1::date)::int AS eligible,
             (SELECT count(*) FROM c WHERE c.first + n <= $1::date
-               AND EXISTS (SELECT 1 FROM daily_activity a WHERE a.device_id = c.id AND a.day = c.first + n))::int AS active
+               AND EXISTS (SELECT 1 FROM ${act('a')} WHERE a.device_id = c.id AND a.day = c.first + n))::int AS active
      FROM generate_series(0, $2::int - 1) n`,
     [end, RETENTION_DAYS],
   )
@@ -108,12 +119,12 @@ async function collect(from, to) {
   const cohortRows = await rows(
     `WITH c AS (
        SELECT id, date(created_at) AS first, ($1::date - date(created_at)) / 7 AS k
-       FROM devices WHERE date(created_at) BETWEEN $1::date - (7 * $2::int - 1) AND $1::date
+       FROM ${dev()} WHERE date(created_at) BETWEEN $1::date - (7 * $2::int - 1) AND $1::date
      )
      SELECT c.k, -1 AS week, count(*)::int AS devices FROM c GROUP BY c.k
      UNION ALL
      SELECT c.k, ((a.day - c.first) / 7)::int, count(DISTINCT a.device_id)::int
-     FROM c JOIN daily_activity a ON a.device_id = c.id AND a.day >= c.first AND a.day <= $1::date
+     FROM c JOIN ${act('a')} ON a.device_id = c.id AND a.day >= c.first AND a.day <= $1::date
        AND a.day < c.first + 7 * $2::int
      GROUP BY 1, 2`,
     [end, COHORT_WEEKS],
@@ -131,22 +142,22 @@ async function collect(from, to) {
   const retention = { end, daily: retentionDaily, cohorts }
 
   // Breakdowns over devices active in the range.
-  const active = `id IN (SELECT device_id FROM daily_activity WHERE day BETWEEN $1::date AND $2::date)`
+  const active = `id IN (SELECT device_id FROM ${act()} WHERE day BETWEEN $1::date AND $2::date)`
   const versions = await rows(
-    `SELECT os, app_version AS version, count(*)::int AS devices FROM devices WHERE ${active}
+    `SELECT os, app_version AS version, count(*)::int AS devices FROM ${dev()} WHERE ${active}
      GROUP BY 1, 2 ORDER BY 3 DESC LIMIT 20`,
     [from, to],
   )
   const platforms = await rows(
-    `SELECT os, count(*)::int AS devices FROM devices WHERE ${active} GROUP BY 1 ORDER BY 2 DESC`,
+    `SELECT os, count(*)::int AS devices FROM ${dev()} WHERE ${active} GROUP BY 1 ORDER BY 2 DESC`,
     [from, to],
   )
   const countries = await rows(
-    `SELECT coalesce(country, '—') AS country, count(*)::int AS devices FROM devices WHERE ${active}
+    `SELECT coalesce(country, '—') AS country, count(*)::int AS devices FROM ${dev()} WHERE ${active}
      GROUP BY 1 ORDER BY 2 DESC LIMIT 15`,
     [from, to],
   )
-  return { generatedAt: new Date().toISOString(), summary, period, daily, retention, versions, platforms, countries }
+  return { generatedAt: new Date().toISOString(), os, oses, summary, period, daily, retention, versions, platforms, countries }
 }
 
 createServer(async (req, res) => {
@@ -156,7 +167,8 @@ createServer(async (req, res) => {
     return
   }
   try {
-    const data = await collect(...(await range(url.searchParams)))
+    const oses = (await rows(`SELECT DISTINCT os FROM devices ORDER BY os`)).map((r) => r.os)
+    const data = await collect(...(await range(url.searchParams, oses)), oses)
     // Read per request, so an edited template shows on reload.
     const html = readFileSync(new URL('./dashboard.html', import.meta.url), 'utf8').replace(
       '/*DATA*/null',

@@ -31,7 +31,7 @@
   .kpi b { display: block; font-size: 26px; font-variant-numeric: tabular-nums; }
   .range { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 12px; margin: 8px 0 12px; }
   .range h2 { margin: 0; }
-  .range input, .range button, .range a { font: inherit; color: var(--text); background: var(--card);
+  .range input, .range select, .range button, .range a { font: inherit; color: var(--text); background: var(--card);
          border: 1px solid var(--line); border-radius: 6px; padding: 4px 8px; text-decoration: none; }
   .range button { cursor: pointer; }
   .range a.on { border-color: var(--c1); color: var(--c1); }
@@ -74,6 +74,7 @@
   <section class="kpis" id="kpis"></section>
   <form class="range" method="get">
     <h2>Range</h2>
+    <select name="os" id="os" onchange="this.form.submit()"></select>
     <input type="date" name="from" id="from" required> – <input type="date" name="to" id="to" required>
     <button>Apply</button>
     <span id="presets"></span>
@@ -115,10 +116,14 @@ const p = DATA.period;
 const span = (Date.parse(p.to) - Date.parse(p.from)) / 86400000 + 1;
 document.getElementById('from').value = p.from;
 document.getElementById('to').value = p.to;
+const osSelect = document.getElementById('os');
+osSelect.innerHTML = '<option value="">All platforms</option>' +
+  DATA.oses.map((os) => `<option${os === DATA.os ? ' selected' : ''}>${esc(os)}</option>`).join('');
+const osParam = DATA.os ? `&os=${encodeURIComponent(DATA.os)}` : '';
 const before = (days) => new Date(Date.parse(s.today) - (days - 1) * 86400000).toISOString().slice(0, 10);
 document.getElementById('presets').innerHTML = [[7, '7d'], [30, '30d'], [90, '90d'], [365, '1y']].map(([days, label]) => {
   const on = p.to === s.today && p.from === before(days) ? ' class="on"' : '';
-  return `<a${on} href="?from=${before(days)}&to=${s.today}">${label}</a>`;
+  return `<a${on} href="?from=${before(days)}&to=${s.today}${osParam}">${label}</a>`;
 }).join(' ');
 document.getElementById('period').innerHTML = [
   [`Active ${p.from} – ${p.to}`, p.active], ['New in range', p.new_devices], ['Launches in range', p.launches],
