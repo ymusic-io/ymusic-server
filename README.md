@@ -91,7 +91,8 @@ GET /v1/sponsorblock/segments?v=<videoId>  → 200 {segments: [{startTime, endTi
 
 Seconds; only `sponsor`, `music_offtopic`, `intro`, `outro` and `interaction`, at least 1 s long,
 overlaps merged, sorted, and a first segment starting under 1 s snapped to 0. An unknown video is
-`200` with no segments; `400` for a malformed id; `503` until a database has been synced.
+`200` with no segments; `400` for a malformed id; `503` until a database has been synced. A `200`
+carries `Cache-Control: public, max-age=900`.
 
 The data is the sb-mirror server's sqlite build (repo `sponsor-block-mirror`): it rsyncs
 SponsorBlock's `sponsorTimes.csv`, drops hidden and down-voted rows, and publishes
@@ -144,7 +145,7 @@ staged rollouts but no rule reads it yet.
 
 Neither is this server's job. It sets no `Cache-Control` and no `ETag`, so the reverse proxy decides
 caching without anything here overriding it, and installers/changelogs are served by the proxy from
-disk.
+disk. The one exception is SponsorBlock's `200`, which says how long it stays good (15 minutes).
 
 ## Running
 
