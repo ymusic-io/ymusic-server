@@ -1,5 +1,6 @@
 #!/bin/bash
-# Build and (re)start the API (ymusic-server) and the dashboard (ymusic-dashboard) under pm2:
+# Build and (re)start the API (ymusic-server), the dashboard (ymusic-dashboard) and the SponsorBlock
+# sync (ymusic-sb-sync) under pm2:
 # start on first run, zero-downtime reload after. Both read .env (DASHBOARD_* for the dashboard).
 #
 #   scripts/reload_api.sh          reload
@@ -48,5 +49,7 @@ deploy() {
 # on the API's port silently joins its round-robin instead of failing with EADDRINUSE.
 deploy ymusic-server dist/index.js -i 2
 deploy ymusic-dashboard dist/dashboard/index.js
+# One downloader for both API workers (fork mode); they read what it leaves in YM_SB_DIR.
+deploy ymusic-sb-sync dist/sponsorBlock/sync.js
 
 pm2 save
