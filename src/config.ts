@@ -8,6 +8,8 @@ export interface AppConfig {
   cookieSecret?: string | undefined
   /** Serve HTTPS with this cert (YM_TLS_CERT + YM_TLS_KEY); plain HTTP without. */
   tls?: TlsFiles | undefined
+  /** SponsorBlock builds, shared with the sync process (YM_SB_DIR). */
+  sponsorBlockDir: string
 }
 
 export function loadConfig(env: NodeJS.ProcessEnv = process.env): AppConfig {
@@ -30,5 +32,6 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): AppConfig {
       : undefined,
     cookieSecret: env.YM_COOKIE_SECRET,
     tls: tlsFiles(env.YM_TLS_CERT, env.YM_TLS_KEY, 'YM_TLS'),
+    sponsorBlockDir: env.YM_SB_DIR ?? 'data/sponsorblock',
   }
 }

@@ -83,6 +83,29 @@ The payload is encrypted with a key that travels only inside the QR, so the data
 ciphertext this server cannot read. Expired rows are swept whenever a slot is opened. Without a
 database these routes answer 503.
 
+## SponsorBlock
+
+```
+GET /v1/sponsorblock/segments?v=<videoId>  → 200 {segments: [{startTime, endTime, category, videoDuration}]}
+```
+
+Seconds; only `sponsor`, `music_offtopic`, `intro`, `outro` and `interaction`, at least 1 s long,
+overlaps merged, sorted, and a first segment starting under 1 s snapped to 0. An unknown video is
+`200` with no segments; `400` for a malformed id; `503` until a database has been synced.
+
+The data is the sb-mirror server's sqlite build (repo `sponsor-block-mirror`): it rsyncs
+SponsorBlock's `sponsorTimes.csv`, drops hidden and down-voted rows, and publishes
+`<lastUpdated>_<md5>_sqlite.db` (one indexed `sponsorTimes` table, ~1.5 GB) at `/mirror/`, listed by
+`/db_list`. `ymusic-sb-sync` (`src/sponsorBlock/sync.ts`, its own pm2 process) polls that list every
+minute, downloads a new build, checks its md5 against the name and that it opens, and keeps the
+newest two in `YM_SB_DIR`. Each API worker opens the newest build read-only and switches within
+10 s of a new one landing.
+
+| Env | |
+| --- | --- |
+| `YM_SB_DIR` | builds, shared by the sync and the API; `data/sponsorblock` |
+| `YM_SB_MIRROR` | the sync's source; `https://sb-mirror.ymusicapp.com` |
+
 ## Layout
 
 ```
@@ -91,6 +114,8 @@ src/appConfig.ts        the config document: shape, defaults, validation, per-ca
 src/configStore.ts      app_config versions, and the API's in-memory copy
 src/routes/health.ts    GET /healthz
 src/routes/link.ts      the QR sign-in relay (store: src/links.ts)
+src/routes/sponsorBlock.ts  GET /v1/sponsorblock/segments (reader: src/sponsorBlock/segments.ts)
+src/sponsorBlock/sync.ts    the ymusic-sb-sync process: mirror → YM_SB_DIR
 src/routes/index.ts     the list every route is registered from
 src/server.ts           builds the fastify instance
 src/index.ts            reads env, listens

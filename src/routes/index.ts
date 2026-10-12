@@ -3,6 +3,7 @@ import configRoutes from './config.js'
 import healthRoutes from './health.js'
 import linkRoutes from './link.js'
 import pulseRoutes from './pulse.js'
+import sponsorBlockRoutes from './sponsorBlock.js'
 
 /**
  * Every route the server exposes. Adding an endpoint is a file in this folder and a line here.
@@ -11,4 +12,4 @@ import pulseRoutes from './pulse.js'
  * @fastify/autoload, and an explicit list means the compiler sees a missing or misnamed module
  * instead of the server simply starting up without that route.
  */
-export const routes: FastifyPluginAsync[] = [healthRoutes, configRoutes, pulseRoutes, linkRoutes]
+export const routes: FastifyPluginAsync[] = [healthRoutes, configRoutes, pulseRoutes, linkRoutes, sponsorBlockRoutes]

@@ -5,6 +5,7 @@ import { CachedConfig, type ConfigSource, StaticConfig } from './configStore.js'
 import { Analytics, openPool, type PgSettings } from './db.js'
 import { type LinkStore, PgLinkStore } from './links.js'
 import { routes } from './routes/index.js'
+import { SponsorBlockDb } from './sponsorBlock/segments.js'
 import { scheduleRollup } from './stats.js'
 import { httpsOptions, type TlsFiles } from './tls.js'
 
@@ -16,6 +17,8 @@ declare module 'fastify' {
     links: LinkStore | null
     /** The live /v1/config rules: app_config, or the defaults without a database. */
     appConfig: ConfigSource
+    /** Skip segments from the synced SponsorBlock build; null when not configured. */
+    sponsorBlock: SponsorBlockDb | null
   }
 }
 
@@ -32,6 +35,8 @@ export interface ServerOptions {
   stats?: boolean | undefined
   /** Serve HTTPS with this cert. */
   tls?: TlsFiles | undefined
+  /** Where the sync process (sponsorBlock/sync.ts) leaves SponsorBlock builds. */
+  sponsorBlockDir?: string | undefined
 }
 
 export async function buildServer(options: ServerOptions = {}): Promise<FastifyInstance> {
@@ -54,9 +59,12 @@ export async function buildServer(options: ServerOptions = {}): Promise<FastifyI
     appConfig = cached
   }
   app.decorate('appConfig', appConfig ?? new StaticConfig(DEFAULT_APP_CONFIG))
+  const sponsorBlock = options.sponsorBlockDir ? new SponsorBlockDb(options.sponsorBlockDir, app.log) : null
+  app.decorate('sponsorBlock', sponsorBlock)
   const stopStats = pool && options.stats ? scheduleRollup(pool, app.log) : null
   app.addHook('onClose', async () => {
     stopStats?.()
+    sponsorBlock?.close()
     await pool?.end()
   })
 
