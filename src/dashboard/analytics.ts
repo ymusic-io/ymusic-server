@@ -33,7 +33,7 @@ interface Day {
 
 interface Group {
   os: string | null
-  version: number | null
+  version: string | null
   country: string
   devices: number
   g: number
@@ -146,14 +146,16 @@ export async function analytics(pool: pg.Pool, query: Query) {
   })
 
   // Breakdowns over devices active in the range, by their current attributes: one scan, three
-  // groupings. GROUPING() bits are (os, app_version, country), 1 = rolled up.
+  // groupings. GROUPING() bits are (os, version, country), 1 = rolled up. Builds that predate
+  // x-app-ver-name show as "build <code>".
   let breakdowns: { versions: Group[]; platforms: Group[]; countries: Group[] } | null = null
   if (endsToday) {
     const groups = await rows<Group>(
-      `SELECT os, app_version AS version, coalesce(country, '—') AS country, count(*)::int AS devices,
-              GROUPING(os, app_version, country) AS g
-       FROM devices WHERE last_active >= $1::date AND ${onOs('os')}
-       GROUP BY GROUPING SETS ((app_version), (os), (country))
+      `SELECT os, version, country, count(*)::int AS devices, GROUPING(os, version, country) AS g
+       FROM (SELECT os, coalesce(app_version_name, 'build ' || app_version) AS version,
+                    coalesce(country, '—') AS country
+             FROM devices WHERE last_active >= $1::date AND ${onOs('os')}) d
+       GROUP BY GROUPING SETS ((version), (os), (country))
        ORDER BY devices DESC`,
       [from],
     )

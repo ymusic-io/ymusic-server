@@ -14,6 +14,8 @@ export interface EventContext {
   os: string
   osVersion: string
   appVersion: number
+  /** x-app-ver-name ("1.0.0"); null when absent or not version-shaped. */
+  appVersionName: string | null
   country: string | null
 }
 
@@ -93,6 +95,7 @@ CREATE INDEX IF NOT EXISTS device_links_expires_at ON device_links (expires_at);
 ALTER TABLE devices ADD COLUMN IF NOT EXISTS os_version text;
 ALTER TABLE event_app_update ADD COLUMN IF NOT EXISTS os text;
 ALTER TABLE devices ADD COLUMN IF NOT EXISTS last_active date;
+ALTER TABLE devices ADD COLUMN IF NOT EXISTS app_version_name text;
 CREATE INDEX IF NOT EXISTS devices_created_at ON devices (created_at);
 CREATE INDEX IF NOT EXISTS devices_last_active ON devices (last_active);
 
@@ -226,6 +229,7 @@ export class Analytics {
     os: string
     osVersion: string
     appVersion: number
+    appVersionName: string | null
     country: string | null
     events: AcceptedEvent[]
     /**
@@ -250,12 +254,13 @@ export class Analytics {
     if (input.days.length > 0 || input.refreshDevice) {
       ctes.push(
         `dev AS (
-           INSERT INTO devices (id, os, os_version, app_version, country, last_active, created_at, updated_at)
-           VALUES (${bind(input.deviceId)}, ${bind(input.os)}, ${bind(input.osVersion)}, ${bind(input.appVersion)}, ${bind(input.country)}, ${bind(lastActive)}::date, now(), now())
+           INSERT INTO devices (id, os, os_version, app_version, app_version_name, country, last_active, created_at, updated_at)
+           VALUES (${bind(input.deviceId)}, ${bind(input.os)}, ${bind(input.osVersion)}, ${bind(input.appVersion)}, ${bind(input.appVersionName)}, ${bind(input.country)}, ${bind(lastActive)}::date, now(), now())
            ON CONFLICT (id) DO UPDATE SET
              os = EXCLUDED.os,
              os_version = EXCLUDED.os_version,
              app_version = EXCLUDED.app_version,
+             app_version_name = EXCLUDED.app_version_name,
              country = COALESCE(EXCLUDED.country, devices.country),
              last_active = GREATEST(devices.last_active, EXCLUDED.last_active),
              updated_at = now())`,

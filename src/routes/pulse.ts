@@ -4,6 +4,7 @@ import { header } from '../headers.js'
 
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i
 const COUNTRY = /^[a-z]{2}$/i
+const VERSION_NAME = /^[0-9A-Za-z][0-9A-Za-z.+_-]{0,31}$/
 
 /** Junk device clocks must not pollute history: anything older than this is dropped. */
 const MAX_EVENT_AGE_MS = 60 * 24 * 60 * 60 * 1000
@@ -57,10 +58,12 @@ export default async function pulseRoutes(app: FastifyInstance): Promise<void> {
 
     const deviceId = header(req.headers['x-device-id'])?.toLowerCase()
     const rawCountry = header(req.headers['cf-ipcountry'])
+    const rawVersionName = header(req.headers['x-app-ver-name'])
     const ctx: EventContext = {
       os: (header(req.headers['x-os']) ?? '').toLowerCase(),
       osVersion: header(req.headers['x-os-ver']) ?? '',
       appVersion: Number.parseInt(header(req.headers['x-app-ver']) ?? '', 10) || -1,
+      appVersionName: VERSION_NAME.test(rawVersionName ?? '') ? rawVersionName! : null,
       country: rawCountry && COUNTRY.test(rawCountry) ? rawCountry.toUpperCase() : null,
     }
 
@@ -108,6 +111,7 @@ export default async function pulseRoutes(app: FastifyInstance): Promise<void> {
         os: ctx.os,
         osVersion: ctx.osVersion,
         appVersion: ctx.appVersion,
+        appVersionName: ctx.appVersionName,
         country: ctx.country,
         events: accepted,
         days: creditDays,
