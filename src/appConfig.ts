@@ -12,6 +12,16 @@ export interface AppRelease {
   size: number
   sha256: string
   signature: string
+  /** The full release notes; the update dialog's "Full changelog". */
+  changelogUrl?: string | null
+  /** The web page the dialog's "Download" opens when [installInApp] is false. */
+  downloadPage?: string | null
+  /**
+   * Whether this build can upgrade the installed one in place ("Install now"). False when it cannot
+   * be installed over it (e.g. signed with another key): the app offers [downloadPage] instead.
+   * Absent = true.
+   */
+  installInApp?: boolean
 }
 
 /**
@@ -93,7 +103,8 @@ export function validateAppConfig(value: unknown): string[] {
         errors.push(`releases.${platform} must be null or a release`)
         continue
       }
-      fields(release, `releases.${platform}`, {
+      const where = `releases.${platform}`
+      fields(release, where, {
         versionCode: 'number',
         versionName: 'string',
         notes: 'string',
@@ -102,6 +113,16 @@ export function validateAppConfig(value: unknown): string[] {
         sha256: 'string',
         signature: 'string',
       })
+      for (const key of ['changelogUrl', 'downloadPage'] as const) {
+        const url = release[key]
+        if (url !== undefined && url !== null && typeof url !== 'string') errors.push(`${where}.${key} must be a string or null`)
+      }
+      if (release.installInApp !== undefined && typeof release.installInApp !== 'boolean') {
+        errors.push(`${where}.installInApp must be true or false`)
+      }
+      if (release.installInApp === false && typeof release.downloadPage !== 'string') {
+        errors.push(`${where}.downloadPage is required when installInApp is false`)
+      }
     }
   }
   for (const name of ['engineJs', 'playerJs'] as const) {
