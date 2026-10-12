@@ -45,7 +45,7 @@ describe('GET /v1/config', () => {
     const res = await get('windows', '1234', 'x64')
 
     expect(res.statusCode).toBe(200)
-    expect(res.json()).toEqual({ features: { variableA: 123, featureX: true }, appUpdate: null, ...BUNDLES })
+    expect(res.json()).toEqual({ features: { variableA: 123, featureX: true, telegramUrl: 'https://t.me/ymusic_io' }, appUpdate: null, ...BUNDLES })
   })
 
   it('offers the update to an older build', async () => {
@@ -96,14 +96,14 @@ describe('GET /v1/config', () => {
     const res = await app.inject('/v1/config?os=windows&appVer=1&deviceId=abc')
 
     expect(res.statusCode).toBe(200)
-    expect(res.json()).toEqual({ features: { variableA: 123, featureX: false }, appUpdate: null, ...BUNDLES })
+    expect(res.json()).toEqual({ features: { variableA: 123, featureX: false, telegramUrl: 'https://t.me/ymusic_io' }, appUpdate: null, ...BUNDLES })
   })
 
   it('answers a request with no headers and no query at all', async () => {
     const res = await app.inject('/v1/config')
 
     expect(res.statusCode).toBe(200)
-    expect(res.json()).toEqual({ features: { variableA: 123, featureX: false }, appUpdate: null, ...BUNDLES })
+    expect(res.json()).toEqual({ features: { variableA: 123, featureX: false, telegramUrl: 'https://t.me/ymusic_io' }, appUpdate: null, ...BUNDLES })
   })
 
   it('sets no cache-control, leaving caching to the reverse proxy', async () => {

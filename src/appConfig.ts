@@ -57,7 +57,7 @@ export interface AppConfig {
 
 /** The first stored version, seeded into an empty app_config. */
 export const DEFAULT_APP_CONFIG: AppConfig = {
-  flags: { variableA: 123, featureX: false },
+  flags: { variableA: 123, featureX: false, telegramUrl: 'https://t.me/ymusic_io' },
   flagsByOs: { windows: { featureX: true } },
   releases: {
     android: null,
