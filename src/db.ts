@@ -17,6 +17,9 @@ export interface EventContext {
   /** x-app-ver-name ("1.0.0"); null when absent or not version-shaped. */
   appVersionName: string | null
   country: string | null
+  /** x-engine-js-ver / x-player-js-ver: the bundle revisions running; null until that bundle ran. */
+  engineJsVersion: number | null
+  playerJsVersion: number | null
 }
 
 export interface EventDef {
@@ -96,6 +99,8 @@ ALTER TABLE devices ADD COLUMN IF NOT EXISTS os_version text;
 ALTER TABLE event_app_update ADD COLUMN IF NOT EXISTS os text;
 ALTER TABLE devices ADD COLUMN IF NOT EXISTS last_active date;
 ALTER TABLE devices ADD COLUMN IF NOT EXISTS app_version_name text;
+ALTER TABLE devices ADD COLUMN IF NOT EXISTS engine_js_version integer;
+ALTER TABLE devices ADD COLUMN IF NOT EXISTS player_js_version integer;
 CREATE INDEX IF NOT EXISTS devices_created_at ON devices (created_at);
 CREATE INDEX IF NOT EXISTS devices_last_active ON devices (last_active);
 
@@ -231,6 +236,8 @@ export class Analytics {
     appVersion: number
     appVersionName: string | null
     country: string | null
+    engineJsVersion: number | null
+    playerJsVersion: number | null
     events: AcceptedEvent[]
     /**
      * Days to credit as 'YYYY-MM-DD', bucketed in the DB's own timezone (+07 — see dayOf in
@@ -240,7 +247,7 @@ export class Analytics {
      * the cookie value by plain equality.
      */
     days: string[]
-    /** Rewrite the device row even with no day to credit: its app version changed. */
+    /** Rewrite the device row even with no day to credit: its app or a bundle version changed. */
     refreshDevice?: boolean
   }): Promise<void> {
     const params: unknown[] = []
@@ -254,14 +261,17 @@ export class Analytics {
     if (input.days.length > 0 || input.refreshDevice) {
       ctes.push(
         `dev AS (
-           INSERT INTO devices (id, os, os_version, app_version, app_version_name, country, last_active, created_at, updated_at)
-           VALUES (${bind(input.deviceId)}, ${bind(input.os)}, ${bind(input.osVersion)}, ${bind(input.appVersion)}, ${bind(input.appVersionName)}, ${bind(input.country)}, ${bind(lastActive)}::date, now(), now())
+           INSERT INTO devices (id, os, os_version, app_version, app_version_name, country, engine_js_version, player_js_version, last_active, created_at, updated_at)
+           VALUES (${bind(input.deviceId)}, ${bind(input.os)}, ${bind(input.osVersion)}, ${bind(input.appVersion)}, ${bind(input.appVersionName)}, ${bind(input.country)}, ${bind(input.engineJsVersion)}::integer, ${bind(input.playerJsVersion)}::integer, ${bind(lastActive)}::date, now(), now())
            ON CONFLICT (id) DO UPDATE SET
              os = EXCLUDED.os,
              os_version = EXCLUDED.os_version,
              app_version = EXCLUDED.app_version,
              app_version_name = EXCLUDED.app_version_name,
              country = COALESCE(EXCLUDED.country, devices.country),
+             -- A batch sent before a bundle ran carries no header for it: keep what is known.
+             engine_js_version = COALESCE(EXCLUDED.engine_js_version, devices.engine_js_version),
+             player_js_version = COALESCE(EXCLUDED.player_js_version, devices.player_js_version),
              last_active = GREATEST(devices.last_active, EXCLUDED.last_active),
              updated_at = now())`,
       )

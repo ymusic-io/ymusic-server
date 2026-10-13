@@ -31,6 +31,11 @@ interface Day {
   launches: number
 }
 
+interface BundleGroup {
+  version: number | null
+  devices: number
+}
+
 interface Group {
   os: string | null
   version: string | null
@@ -166,6 +171,24 @@ export async function analytics(pool: pg.Pool, query: Query) {
     }
   }
 
+  // The JS bundle revisions active devices last reported (null: that bundle never ran there, or
+  // the build predates the x-*-js-ver headers).
+  let bundles: { engine: BundleGroup[]; player: BundleGroup[] } | null = null
+  if (endsToday) {
+    const bundleRows = await rows<BundleGroup & { bundle: 'engine' | 'player' }>(
+      `SELECT 'engine' AS bundle, engine_js_version AS version, count(*)::int AS devices
+       FROM devices WHERE last_active >= $1::date AND ${onOs('os')} GROUP BY engine_js_version
+       UNION ALL
+       SELECT 'player' AS bundle, player_js_version AS version, count(*)::int AS devices
+       FROM devices WHERE last_active >= $1::date AND ${onOs('os')} GROUP BY player_js_version
+       ORDER BY devices DESC`,
+      [from],
+    )
+    const of = (bundle: 'engine' | 'player'): BundleGroup[] =>
+      bundleRows.filter((r) => r.bundle === bundle).map(({ version, devices }) => ({ version, devices }))
+    bundles = { engine: of('engine'), player: of('player') }
+  }
+
   return {
     os,
     oses,
@@ -176,5 +199,7 @@ export async function analytics(pool: pg.Pool, query: Query) {
     versions: breakdowns?.versions ?? null,
     platforms: breakdowns?.platforms ?? null,
     countries: breakdowns?.countries ?? null,
+    engineVersions: bundles?.engine ?? null,
+    playerVersions: bundles?.player ?? null,
   }
 }

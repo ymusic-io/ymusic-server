@@ -5,6 +5,7 @@ import { header } from '../headers.js'
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i
 const COUNTRY = /^[a-z]{2}$/i
 const VERSION_NAME = /^[0-9A-Za-z][0-9A-Za-z.+_-]{0,31}$/
+const BUNDLE_VERSION = /^[1-9][0-9]{0,8}$/
 
 /** Junk device clocks must not pollute history: anything older than this is dropped. */
 const MAX_EVENT_AGE_MS = 60 * 24 * 60 * 60 * 1000
@@ -13,11 +14,12 @@ const MAX_EVENT_AGE_MS = 60 * 24 * 60 * 60 * 1000
 const MAX_EVENTS_PER_BATCH = 15
 
 /**
- * The advisory write-skip cookie, `<day>.<appVersion>`: the last day this device's activity was
- * credited and the app version the device row last recorded.
+ * The advisory write-skip cookie, `<day>.<appVersion>.<engineJs>.<playerJs>`: the last day this
+ * device's activity was credited and the app + bundle versions the device row last recorded (`-`
+ * for a bundle not yet seen). A cookie from before the bundle fields reads as "bundles unknown".
  */
 const ACTIVITY_COOKIE = 'act'
-const ACTIVITY_VALUE = /^(\d{4}-\d{2}-\d{2})\.(-?\d+)$/
+const ACTIVITY_VALUE = /^(\d{4}-\d{2}-\d{2})\.(-?\d+)(?:\.(\d+|-)\.(\d+|-))?$/
 const ACTIVITY_COOKIE_MAX_AGE_S = 2 * 24 * 60 * 60
 
 /**
@@ -65,6 +67,8 @@ export default async function pulseRoutes(app: FastifyInstance): Promise<void> {
       appVersion: Number.parseInt(header(req.headers['x-app-ver']) ?? '', 10) || -1,
       appVersionName: VERSION_NAME.test(rawVersionName ?? '') ? rawVersionName! : null,
       country: rawCountry && COUNTRY.test(rawCountry) ? rawCountry.toUpperCase() : null,
+      engineJsVersion: bundleVersion(header(req.headers['x-engine-js-ver'])),
+      playerJsVersion: bundleVersion(header(req.headers['x-player-js-ver'])),
     }
 
     const accepted: AcceptedEvent[] = []
@@ -98,13 +102,17 @@ export default async function pulseRoutes(app: FastifyInstance): Promise<void> {
     // device. Only days AFTER it need crediting ('YYYY-MM-DD' compares as text; the client
     // sends oldest→newest, so a backlog batch spanning days credits exactly the uncovered
     // tail). Absent or invalid reads as "credit everything" — ON CONFLICT stays the guarantee.
-    // A version other than the cookie's rewrites the device row even mid-day, so an update shows
-    // in the version breakdown at once.
+    // A version other than the cookie's — app, or a bundle the batch reports — rewrites the device
+    // row even mid-day, so an update shows in the version breakdowns at once. An absent bundle
+    // header is no news: the row keeps its value, and so does the cookie.
     const cookie = readActivityCookie(req)
     const cookieDay = cookie?.day
     const batchDays = [...days].sort()
     const creditDays = cookieDay === undefined ? batchDays : batchDays.filter((day) => day > cookieDay)
-    const versionChanged = cookie?.appVersion !== ctx.appVersion
+    const engineJs = ctx.engineJsVersion ?? cookie?.engineJs ?? null
+    const playerJs = ctx.playerJsVersion ?? cookie?.playerJs ?? null
+    const versionChanged =
+      cookie?.appVersion !== ctx.appVersion || engineJs !== (cookie?.engineJs ?? null) || playerJs !== (cookie?.playerJs ?? null)
     try {
       await app.analytics.ingest({
         deviceId,
@@ -113,6 +121,8 @@ export default async function pulseRoutes(app: FastifyInstance): Promise<void> {
         appVersion: ctx.appVersion,
         appVersionName: ctx.appVersionName,
         country: ctx.country,
+        engineJsVersion: ctx.engineJsVersion,
+        playerJsVersion: ctx.playerJsVersion,
         events: accepted,
         days: creditDays,
         refreshDevice: versionChanged,
@@ -126,7 +136,7 @@ export default async function pulseRoutes(app: FastifyInstance): Promise<void> {
     // an active device moves it daily and the cookie lives two.)
     const lastDay = batchDays.at(-1)!
     const watermark = cookieDay !== undefined && cookieDay > lastDay ? cookieDay : lastDay
-    if (watermark !== cookieDay || versionChanged) setActivityCookie(reply, watermark, ctx.appVersion)
+    if (watermark !== cookieDay || versionChanged) setActivityCookie(reply, watermark, ctx.appVersion, engineJs, playerJs)
     return reply.code(204).send()
   })
 }
@@ -141,17 +151,33 @@ function stringProps(raw: unknown): Record<string, string> {
   return props
 }
 
-function readActivityCookie(req: FastifyRequest): { day: string; appVersion: number } | undefined {
+/** A bundle revision header: a positive integer, else null (absent or malformed alike). */
+function bundleVersion(raw: string | undefined): number | null {
+  return raw !== undefined && BUNDLE_VERSION.test(raw) ? Number(raw) : null
+}
+
+function readActivityCookie(
+  req: FastifyRequest,
+): { day: string; appVersion: number; engineJs: number | null; playerJs: number | null } | undefined {
   const raw = req.cookies?.[ACTIVITY_COOKIE]
   if (raw === undefined || req.unsignCookie === undefined) return undefined
   const unsigned = req.unsignCookie(raw)
   const match = unsigned.valid && unsigned.value !== null ? ACTIVITY_VALUE.exec(unsigned.value) : null
-  return match ? { day: match[1]!, appVersion: Number(match[2]) } : undefined
+  const bundle = (field: string | undefined): number | null => (field && field !== '-' ? Number(field) : null)
+  return match
+    ? { day: match[1]!, appVersion: Number(match[2]), engineJs: bundle(match[3]), playerJs: bundle(match[4]) }
+    : undefined
 }
 
-function setActivityCookie(reply: FastifyReply, day: string, appVersion: number): void {
+function setActivityCookie(
+  reply: FastifyReply,
+  day: string,
+  appVersion: number,
+  engineJs: number | null,
+  playerJs: number | null,
+): void {
   if (reply.setCookie === undefined) return // cookie plugin off (no secret configured)
-  reply.setCookie(ACTIVITY_COOKIE, `${day}.${appVersion}`, {
+  reply.setCookie(ACTIVITY_COOKIE, `${day}.${appVersion}.${engineJs ?? '-'}.${playerJs ?? '-'}`, {
     signed: true,
     httpOnly: true,
     path: '/v1',
