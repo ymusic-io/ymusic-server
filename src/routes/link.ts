@@ -7,7 +7,7 @@ export const LINK_TTL_MS = 10 * 60 * 1000
 const MAX_PAYLOAD_BYTES = 64 * 1024
 
 const LINK_ID = /^[A-Za-z0-9_-]{22}$/
-const PAYLOAD = /^[A-Za-z0-9_-]+$/
+const PAYLOAD = /^[A-Za-z0-9_-]+={0,2}$/
 
 /**
  * The QR sign-in relay (see LinkStore):
