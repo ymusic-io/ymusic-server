@@ -207,8 +207,8 @@ function render() {
   shares('platforms', DATA.platforms, (r) => r.os || '—');
   shares('versions', DATA.versions, (r) => r.version);
   shares('countries', DATA.countries, (r) => r.country);
-  shares('engineVersions', DATA.engineVersions, (r) => (r.version == null ? '—' : `engine.${r.version}.js`));
-  shares('playerVersions', DATA.playerVersions, (r) => (r.version == null ? '—' : `player.${r.version}.js`));
+  shares('engineVersions', DATA.engineVersions, (r) => (r.version == null ? '—' : String(r.version)));
+  shares('playerVersions', DATA.playerVersions, (r) => (r.version == null ? '—' : String(r.version)));
 }
 
 // The query string is the state: ?from=&to=&os=, as the API takes it.
