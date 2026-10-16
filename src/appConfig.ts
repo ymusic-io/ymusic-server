@@ -43,8 +43,7 @@ export interface AppConfig {
   flagsByOs: Record<string, Record<string, unknown>>
   /**
    * The newest build per platform, null while none is published. Desktop keys carry the arch
-   * (`macos-arm64`); Android gets its split APK (`android-arm64-v8a`) when one is published, else
-   * the universal `android` one.
+   * (`macos-arm64`), Android the device's primary ABI (`android-arm64-v8a`): one APK per ABI.
    */
   releases: Record<string, AppRelease | null>
   /**
@@ -60,8 +59,9 @@ export const DEFAULT_APP_CONFIG: AppConfig = {
   flags: { variableA: 123, featureX: false, telegramUrl: 'https://t.me/ymusic_io' },
   flagsByOs: { windows: { featureX: true } },
   releases: {
-    android: null,
+    'android-armeabi-v7a': null,
     'android-arm64-v8a': null,
+    'android-x86': null,
     'android-x86_64': null,
     'macos-arm64': null,
     'macos-x64': null,
@@ -134,11 +134,9 @@ export function validateAppConfig(value: unknown): string[] {
   return errors
 }
 
-/** The release for this caller: `<os>-<arch>`; Android falls back to its universal `android` APK. */
+/** The release for this caller: `<os>-<arch>`, or `<os>` for a caller that sends no arch. */
 function releaseFor(releases: AppConfig['releases'], os: string, arch: string): AppRelease | null {
-  const exact = arch === '' ? releases[os] : releases[`${os}-${arch}`]
-  if (exact) return exact
-  return os === 'android' ? (releases.android ?? null) : null
+  return (arch === '' ? releases[os] : releases[`${os}-${arch}`]) ?? null
 }
 
 /** The /v1/config answer for one caller. */

@@ -27,8 +27,8 @@ GET /healthz
 
 `appUpdate` is `null` when the caller is already current, or when its platform has no release.
 Desktop platforms are keyed by OS and arch (`macos-arm64`, `windows-x64`, …). Android sends its
-primary ABI and gets its split APK (`android-arm64-v8a`, `android-x86_64`) when one is published,
-else the universal `android` APK.
+primary ABI and gets the APK for it (`android-armeabi-v7a`, `android-arm64-v8a`, `android-x86`,
+`android-x86_64`); there is no universal APK.
 
 `engineJs` and `playerJs` are the latest published bundles, or `null` while none is. The client
 compares each `version` against the bundle it already has: engine.js goes live at once, player.js at

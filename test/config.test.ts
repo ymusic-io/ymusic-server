@@ -31,7 +31,7 @@ beforeEach(async () => {
   config = structuredClone(DEFAULT_APP_CONFIG)
   config.releases['windows-x64'] = release(1234, 'https://x/ymusic-1234.msi')
   config.releases['macos-arm64'] = release(1234, 'https://x/ymusic-1234-arm64.dmg')
-  config.releases.android = release(1234, 'https://x/ymusic-1234.apk')
+  config.releases['android-arm64-v8a'] = release(1234, 'https://x/ymusic-1234-arm64-v8a.apk')
   app = await buildServer({ config: new StaticConfig(config) })
   await app.ready()
 })
@@ -55,7 +55,7 @@ describe('GET /v1/config', () => {
   })
 
   it('keys the update off the platform, so android and windows are independent', async () => {
-    const android = await get('android', '1')
+    const android = await get('android', '1', 'arm64-v8a')
     const windows = await get('windows', '1', 'x64')
 
     expect(android.json().appUpdate.url).toContain('.apk')
@@ -68,11 +68,10 @@ describe('GET /v1/config', () => {
     expect((await get('macos', '1')).json().appUpdate).toBeNull()
   })
 
-  it('offers android its split APK when published, else the universal one', async () => {
-    config.releases['android-arm64-v8a'] = release(1234, 'https://x/ymusic-1234-arm64-v8a.apk')
+  it('offers android the APK for its ABI, and none for an ABI without one', async () => {
     expect((await get('android', '1', 'arm64-v8a')).json().appUpdate.url).toContain('arm64-v8a')
-    expect((await get('android', '1', 'x86_64')).json().appUpdate.url).toBe('https://x/ymusic-1234.apk')
-    expect((await get('android', '1')).json().appUpdate.url).toBe('https://x/ymusic-1234.apk')
+    expect((await get('android', '1', 'x86')).json().appUpdate).toBeNull()
+    expect((await get('android', '1')).json().appUpdate).toBeNull()
   })
 
   it('offers nothing to a platform with no release', async () => {
