@@ -84,10 +84,12 @@ const shortDay = (iso) => new Date(Date.parse(iso + 'T00:00:00Z'))
   .toLocaleDateString('en-US', { month: 'short', day: 'numeric', timeZone: 'UTC' });
 
 // Firebase "User retention": share of devices active on day N after their first day.
+// A day reached by fewer devices than this is noise (1 of 1 = 100%), not retention.
+const RETENTION_MIN_ELIGIBLE = 20;
 function retentionCurve(target, days) {
   const box = document.getElementById(target);
-  const points = days.filter((d) => d.eligible > 0);
-  if (!points.length) { box.innerHTML = '<div class="empty">No data yet</div>'; return; }
+  const points = days.filter((d) => d.eligible >= RETENTION_MIN_ELIGIBLE);
+  if (!points.length) { box.innerHTML = '<div class="empty">Not enough devices yet</div>'; return; }
   const W = Math.max(280, box.clientWidth), H = 240, L = 16, R = 48, T = 8, B = 34;
   const last = days.length - 1;
   const x = (n) => L + n * (W - L - R) / last;
