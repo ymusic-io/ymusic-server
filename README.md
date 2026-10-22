@@ -121,6 +121,7 @@ src/routes/index.ts     the list every route is registered from
 src/server.ts           builds the fastify instance
 src/index.ts            reads env, listens
 src/stats.ts            nightly analytics rollups
+src/metrics.ts          request metrics → Netdata's StatsD (charts: netdata/statsd.d/)
 src/dashboard/          the private dashboard server: Basic Auth, /api/analytics
 dashboard/              its frontend (index.html + app.js), served as-is
 ```
@@ -158,6 +159,20 @@ npm test
 
 `PORT` (8787), `HOST` (0.0.0.0), `LOG_LEVEL` (info). `YM_TLS_CERT` + `YM_TLS_KEY` serve HTTPS
 (the self-signed `tls/api.ymix.io.*` origin cert); without them it is plain HTTP. `trustProxy` is on.
+
+## Metrics
+
+Every response is counted. Each API worker sends StatsD over UDP to `YM_STATSD`
+(default `127.0.0.1:8125`, Netdata's built-in listener; `off` sends nothing), batched once a
+second, and Netdata sums the workers:
+
+- `ymusic.api.requests.<route>.<method>` — `/v1/link/:id` is `v1_link_id`, no matching route is `unmatched`
+- `ymusic.api.status.<2xx|3xx|4xx|5xx>`
+- `ymusic.api.response_time.<route>` — a timer, so Netdata charts average, percentile and max
+
+[`netdata/statsd.d/ymusic-api.conf`](netdata/statsd.d/ymusic-api.conf) groups them into a
+`ymusic_api` section: link or copy it into Netdata's `statsd.d/` config directory and restart
+Netdata, which reads that directory only at start.
 
 ## Dashboard
 

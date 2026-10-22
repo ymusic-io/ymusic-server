@@ -1,4 +1,5 @@
 import type { PgSettings } from './db.js'
+import { type StatsdTarget, statsdTarget } from './metrics.js'
 import { type TlsFiles, tlsFiles } from './tls.js'
 
 export interface AppConfig {
@@ -10,6 +11,8 @@ export interface AppConfig {
   tls?: TlsFiles | undefined
   /** SponsorBlock builds, shared with the sync process (YM_SB_DIR). */
   sponsorBlockDir: string
+  /** Request metrics go here (YM_STATSD, `host:port` or `off`); default Netdata on 127.0.0.1:8125. */
+  statsd?: StatsdTarget | undefined
 }
 
 export function loadConfig(env: NodeJS.ProcessEnv = process.env): AppConfig {
@@ -33,5 +36,6 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): AppConfig {
     cookieSecret: env.YM_COOKIE_SECRET,
     tls: tlsFiles(env.YM_TLS_CERT, env.YM_TLS_KEY, 'YM_TLS'),
     sponsorBlockDir: env.YM_SB_DIR ?? 'data/sponsorblock',
+    statsd: statsdTarget(env.YM_STATSD),
   }
 }

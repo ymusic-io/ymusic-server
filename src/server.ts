@@ -4,6 +4,7 @@ import { DEFAULT_APP_CONFIG } from './appConfig.js'
 import { CachedConfig, type ConfigSource, StaticConfig } from './configStore.js'
 import { Analytics, openPool, type PgSettings } from './db.js'
 import { type LinkStore, PgLinkStore } from './links.js'
+import { registerMetrics, Statsd, type StatsdTarget } from './metrics.js'
 import { routes } from './routes/index.js'
 import { SponsorBlockDb } from './sponsorBlock/segments.js'
 import { scheduleRollup } from './stats.js'
@@ -37,6 +38,8 @@ export interface ServerOptions {
   tls?: TlsFiles | undefined
   /** Where the sync process (sponsorBlock/sync.ts) leaves SponsorBlock builds. */
   sponsorBlockDir?: string | undefined
+  /** Send request metrics to this StatsD (Netdata). Off in tests. */
+  statsd?: StatsdTarget | undefined
 }
 
 export async function buildServer(options: ServerOptions = {}): Promise<FastifyInstance> {
@@ -47,6 +50,7 @@ export async function buildServer(options: ServerOptions = {}): Promise<FastifyI
     ...httpsOptions(options.tls),
   })
 
+  if (options.statsd) registerMetrics(app, new Statsd(options.statsd))
   if (options.cookieSecret) await app.register(fastifyCookie, { secret: options.cookieSecret })
 
   const pool = options.pg ? await openPool(options.pg) : null
