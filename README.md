@@ -169,6 +169,7 @@ second, and Netdata sums the workers:
 
 - `ymusic.api.requests.<route>.<method>` — `/v1/link/:id` is `v1_link_id`, no matching route is `unmatched`
 - `ymusic.api.status.<2xx|3xx|4xx|5xx>`
+- `ymusic.api.errors.<code>` — each 4xx/5xx by its exact code (`404`, `503`, …)
 - `ymusic.api.response_time.<route>` — a timer, so Netdata charts average, percentile and max
 
 [`netdata/statsd.d/ymusic-api.conf`](netdata/statsd.d/ymusic-api.conf) groups them into a

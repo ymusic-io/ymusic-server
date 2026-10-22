@@ -72,7 +72,8 @@ export function routeKey(request: FastifyRequest): string {
 }
 
 /**
- * Per response: `requests.<route>.<method>` and `status.<2xx…5xx>` counters and a
+ * Per response: `requests.<route>.<method>` and `status.<2xx…5xx>` counters, an
+ * `errors.<code>` counter for a 4xx/5xx (which error, not just its class), and a
  * `response_time.<route>` timer (Netdata derives percentiles), summed across the cluster workers.
  */
 export function registerMetrics(app: FastifyInstance, statsd: Statsd): void {
@@ -80,6 +81,7 @@ export function registerMetrics(app: FastifyInstance, statsd: Statsd): void {
     const route = routeKey(request)
     statsd.count(`requests.${route}.${request.method.toLowerCase()}`)
     statsd.count(`status.${Math.floor(reply.statusCode / 100)}xx`)
+    if (reply.statusCode >= 400) statsd.count(`errors.${reply.statusCode}`)
     statsd.timing(`response_time.${route}`, reply.elapsedTime)
   })
   app.addHook('onClose', async () => statsd.close())
