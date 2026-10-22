@@ -13,11 +13,15 @@ export interface AppConfig {
   sponsorBlockDir: string
   /** Request metrics go here (YM_STATSD, `host:port` or `off`); default Netdata on 127.0.0.1:8125. */
   statsd?: StatsdTarget | undefined
+  /** Responses at least this slow are logged (YM_SLOW_MS). */
+  slowMs: number
 }
 
 export function loadConfig(env: NodeJS.ProcessEnv = process.env): AppConfig {
   const port = Number(env.PORT ?? 8787)
   if (!Number.isInteger(port) || port < 0 || port > 65535) throw new Error(`bad PORT: ${env.PORT}`)
+  const slowMs = Number(env.YM_SLOW_MS ?? 500)
+  if (!(slowMs > 0)) throw new Error(`bad YM_SLOW_MS: ${env.YM_SLOW_MS}`)
   return {
     host: env.HOST ?? '0.0.0.0',
     port,
@@ -37,5 +41,6 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): AppConfig {
     tls: tlsFiles(env.YM_TLS_CERT, env.YM_TLS_KEY, 'YM_TLS'),
     sponsorBlockDir: env.YM_SB_DIR ?? 'data/sponsorblock',
     statsd: statsdTarget(env.YM_STATSD),
+    slowMs,
   }
 }

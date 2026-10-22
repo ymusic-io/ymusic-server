@@ -122,6 +122,7 @@ src/server.ts           builds the fastify instance
 src/index.ts            reads env, listens
 src/stats.ts            nightly analytics rollups
 src/metrics.ts          request metrics → Netdata's StatsD (charts: netdata/statsd.d/)
+src/requestLog.ts       logs only 4xx, 5xx and slow requests
 src/dashboard/          the private dashboard server: Basic Auth, /api/analytics
 dashboard/              its frontend (index.html + app.js), served as-is
 ```
@@ -173,6 +174,12 @@ second, and Netdata sums the workers:
 [`netdata/statsd.d/ymusic-api.conf`](netdata/statsd.d/ymusic-api.conf) groups them into a
 `ymusic_api` section: link or copy it into Netdata's `statsd.d/` config directory and restart
 Netdata, which reads that directory only at start.
+
+## Request logs
+
+The log gets one line per problem request only: a 5xx (error), a 4xx including unknown
+paths (warn), and a response slower than `YM_SLOW_MS` (500) (warn). When the request threw, the
+line carries the error: its stack, or a 4xx's reason (bad JSON, body too large).
 
 ## Dashboard
 

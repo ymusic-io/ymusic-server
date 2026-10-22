@@ -10,6 +10,7 @@ const app = await buildServer({
   tls: config.tls,
   sponsorBlockDir: config.sponsorBlockDir,
   statsd: config.statsd,
+  slowMs: config.slowMs,
 })
 
 closeOnSignal(app)

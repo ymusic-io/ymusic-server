@@ -24,7 +24,8 @@ for f in .env tls/ca.crt tls/client-local.crt tls/client-local.key \
   fi
 done
 
-npm ci --omit=dev
+# No audit or funding lookups: nobody reads them here, and a stalled audit request hangs the deploy.
+npm ci --omit=dev --no-audit --no-fund
 npm run build
 
 cmd="reload"
