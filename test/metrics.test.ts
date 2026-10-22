@@ -30,7 +30,7 @@ describe('request metrics', () => {
     expect(received).toContain('ymusic.api.requests.v1_link_id.get:1|c')
     expect(received).toContain('ymusic.api.requests.unmatched.get:1|c')
     expect(received.filter((line) => line === 'ymusic.api.status.4xx:1|c').length).toBeGreaterThanOrEqual(1)
-    expect(received).toContain('ymusic.api.status.2xx:1|c')
+    expect(received.some((line) => line.startsWith('ymusic.api.status.2xx'))).toBe(false)
     expect(received.filter((line) => line === 'ymusic.api.errors.404:1|c').length).toBeGreaterThanOrEqual(1)
     expect(received.some((line) => line.startsWith('ymusic.api.errors.2'))).toBe(false)
     expect(received.some((line) => /^ymusic\.api\.response_time\.healthz:\d+\.\d{2}\|ms$/.test(line))).toBe(true)
