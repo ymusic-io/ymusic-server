@@ -271,9 +271,15 @@ const postJson = (path, body) => api(path, { method: 'POST', headers: { 'content
 let configState; // { live, history }
 const configBodies = new Map(); // version id → config
 // Postgres stores jsonb keys in its own order; show the top level in the documented one.
-const KEY_ORDER = ['flags', 'flagsByOs', 'releases', 'engineJs', 'playerJs'];
-const pretty = (config) => JSON.stringify(
-  Object.fromEntries(Object.entries(config).sort(([a], [b]) => KEY_ORDER.indexOf(a) - KEY_ORDER.indexOf(b))), null, 2);
+const KEY_ORDER = ['flags', 'flagsByOs', 'releases', 'engineJs', 'playerJs', 'testDevices', 'ab'];
+const AB_ORDER = ['percentB', 'rollout', 'testDevices', 'b'];
+const sorted = (object, order) => Object.fromEntries(Object.entries(object).sort(([a], [b]) => order.indexOf(a) - order.indexOf(b)));
+const ordered = (config) => {
+  const top = sorted(config, KEY_ORDER);
+  if (top.ab) top.ab = { ...sorted(top.ab, AB_ORDER), b: sorted(top.ab.b, KEY_ORDER) };
+  return top;
+};
+const pretty = (config) => JSON.stringify(ordered(config), null, 2);
 const when = (iso) => new Date(iso.replace(' ', 'T').replace(/([+-]\d\d)$/, '$1:00')).toLocaleString();
 
 function configMessage(text, ok) {
@@ -282,20 +288,126 @@ function configMessage(text, ok) {
   box.className = 'msg ' + (ok ? 'ok' : 'bad');
 }
 
-async function loadConfig() {
+/**
+ * Loads the live version into the page. [keepEdits] leaves the config editors as they are: a save
+ * of the test devices alone changes nothing they hold.
+ */
+async function loadConfig({ keepEdits = false } = {}) {
   try {
     configState = await api('/api/config');
   } catch (failure) {
     configMessage(`Could not load the config: ${failure.message}`, false);
     return;
   }
-  const { live, history } = configState;
+  const { live } = configState;
+  const $ = (id) => document.getElementById(id);
   configBodies.set(live.id, live.config);
-  document.getElementById('liveMeta').textContent =
-    `· v${live.id} · ${when(live.created_at)}${live.author ? ' · ' + live.author : ''}`;
-  document.getElementById('configText').value = pretty(live.config);
+  $('liveMeta').textContent = `· v${live.id} · ${when(live.created_at)}${live.author ? ' · ' + live.author : ''}`;
+  // Test devices have their own box, saved on their own.
+  const { ab, testDevices = [], ...a } = live.config;
+  $('testDevicesText').value = testDevices.map(({ id, label }) => label ? `${id}  ${label}` : id).join('\n');
+  const count = testDevices.length;
+  $('abTdHint').textContent = `· the ${count} test device${count === 1 ? '' : 's'} below always get the experiment`;
   renderHistory();
+  if (keepEdits) return renderAb();
+  $('configText').value = pretty(a);
+  $('configTextB').value = ab ? pretty(ab.b) : '';
+  $('abSplit').value = 100 - (ab?.percentB ?? 50); // the slider is A's share
+  $('abStartB').value = ab?.rollout?.startB ?? 10;
+  $('abEnd').value = ab?.rollout ? localDay(new Date(ab.rollout.endAt)) : localDay(new Date(Date.now() + 14 * 86400000));
+  $('abTd').checked = ab?.testDevices ?? true;
+  setMode(!ab ? 'off' : ab.rollout ? 'rollout' : 'ab');
 }
+
+// ---- A/B test: the stored config is A, ab.b is B; one test at a time ----
+
+let abMode = 'off'; // 'off' | 'ab' | 'rollout': what the editor will save
+const localDay = (date) => `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}-${String(date.getDate()).padStart(2, '0')}`;
+
+/** The rollout as the editor will save it: a running rollout keeps its start, a new one starts now. */
+function editedRollout() {
+  const live = configState?.live.config.ab?.rollout;
+  const end = document.getElementById('abEnd').value;
+  return {
+    startB: Number(document.getElementById('abStartB').value),
+    startAt: live?.startAt ?? new Date().toISOString(),
+    endAt: end ? new Date(`${end}T00:00`).toISOString() : '',
+  };
+}
+
+/** B's share now; the same line the API draws (appConfig.ts percentB). */
+function editedPercentB() {
+  if (abMode === 'ab') return 100 - Number(document.getElementById('abSplit').value);
+  const { startB, startAt, endAt } = editedRollout();
+  const start = Date.parse(startAt), end = Date.parse(endAt);
+  if (!(end > start)) return startB;
+  return startB + (100 - startB) * Math.min(1, Math.max(0, (Date.now() - start) / (end - start)));
+}
+
+function renderAb() {
+  const $ = (id) => document.getElementById(id);
+  const on = abMode !== 'off';
+  for (const button of document.querySelectorAll('#abModes button')) button.classList.toggle('on', button.dataset.mode === abMode);
+  $('abPanel').hidden = !on;
+  $('editorB').hidden = !on;
+  $('abActions').hidden = !configState?.live.config.ab;
+  $('abDiff').hidden = !on;
+  $('abFixed').hidden = abMode !== 'ab';
+  $('abRollout').hidden = abMode !== 'rollout';
+  // The slider already shows a fixed split; the bar is for the rollout, which has none.
+  $('abBar').hidden = abMode !== 'rollout';
+  const b = Math.round(editedPercentB() * 10) / 10, a = Math.round((100 - b) * 10) / 10;
+  $('abPctA').textContent = a;
+  $('abPctB').textContent = b;
+  $('abNow').innerHTML = `Now: <span class="side-a">Current ${a}%</span> · <span class="side-b">Experiment ${b}%</span>`;
+  $('abSplit').style.setProperty('--a', `${a}%`);
+  $('abBarA').style.width = `${a}%`;
+  $('abBarB').style.width = `${b}%`;
+  $('abBar').setAttribute('aria-label', `Current ${a}%, experiment ${b}%`);
+  $('abRule').textContent = 'bucket = sha256(device ID) % 100, the same for a device forever; buckets below the current config’s share get it. ' +
+    (abMode === 'rollout' ? 'The experiment’s share rises in a straight line to 100% on the end date, so devices only move from current to experiment.' : '');
+  $('configLabelA').textContent = on ? `Current · ${a}%` : 'Config';
+  $('configLabelA').className = 'edlabel' + (on ? ' side-a' : '');
+  $('configLabelB').textContent = `Experiment · ${b}%`;
+}
+
+function setMode(mode) {
+  abMode = mode;
+  // A new test starts from a copy of A, edited into B from there.
+  const textB = document.getElementById('configTextB');
+  if (mode !== 'off' && !textB.value.trim()) textB.value = document.getElementById('configText').value;
+  renderAb();
+}
+
+document.getElementById('abModes').addEventListener('click', (ev) => {
+  const button = ev.target.closest('button');
+  if (button) setMode(button.dataset.mode);
+});
+for (const id of ['abSplit', 'abStartB', 'abEnd', 'abTd']) document.getElementById(id).addEventListener('input', renderAb);
+
+document.getElementById('abCopy').addEventListener('click', () => {
+  document.getElementById('configTextB').value = document.getElementById('configText').value;
+});
+
+document.getElementById('abDiff').addEventListener('click', () => {
+  const a = parsed('configText', 'Current'), b = parsed('configTextB', 'Experiment');
+  if (a === undefined || b === undefined) return;
+  configMessage('', true);
+  showDiff('Current vs experiment', pretty(a), pretty(b));
+});
+
+// Ending the test only sets the editor up; Save writes it.
+document.getElementById('abEndA').addEventListener('click', () => {
+  setMode('off');
+  document.getElementById('configNote').value = 'end A/B test: keep current';
+  configMessage('The current config, without the test. Save as new version to end it.', true);
+});
+document.getElementById('abEndB').addEventListener('click', () => {
+  document.getElementById('configText').value = document.getElementById('configTextB').value;
+  setMode('off');
+  document.getElementById('configNote').value = 'end A/B test: experiment is live';
+  configMessage('The experiment, now for everyone. Save as new version to end the test.', true);
+});
 
 function renderHistory() {
   const { live, history } = configState;
@@ -343,14 +455,53 @@ function showDiff(title, before, after) {
   card.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
 }
 
-function editedConfig() {
+function parsed(id, name) {
   try {
-    return JSON.parse(document.getElementById('configText').value);
+    return JSON.parse(document.getElementById(id).value);
   } catch (failure) {
-    configMessage(`Not valid JSON: ${failure.message}`, false);
+    configMessage(`${name} is not valid JSON: ${failure.message}`, false);
     return undefined;
   }
 }
+
+/** The whole config the editor holds: A, the live test devices, and the test when one is on. */
+function editedConfig() {
+  const parsedA = parsed('configText', abMode === 'off' ? 'The config' : 'Current');
+  if (parsedA === undefined) return undefined;
+  const { testDevices: _, ...rest } = parsedA;
+  const live = configState.live.config.testDevices;
+  const a = live ? { ...rest, testDevices: live } : rest;
+  if (abMode === 'off') return a;
+  const b = parsed('configTextB', 'Experiment');
+  if (b === undefined) return undefined;
+  const testDevices = document.getElementById('abTd').checked;
+  const split = abMode === 'ab' ? { percentB: 100 - Number(document.getElementById('abSplit').value) } : { rollout: editedRollout() };
+  return { ...a, ab: { ...split, testDevices, b } };
+}
+
+// One device per line: the ID, then an optional label.
+document.getElementById('testDevicesSave').addEventListener('click', async () => {
+  const box = document.getElementById('testDevicesMsg');
+  const testDevices = document.getElementById('testDevicesText').value.split('\n').map((line) => line.trim()).filter(Boolean)
+    .map((line) => {
+      const [id, ...label] = line.split(/\s+/);
+      return label.length ? { id, label: label.join(' ') } : { id };
+    });
+  try {
+    const saved = await postJson('/api/config', {
+      config: { ...configState.live.config, testDevices },
+      note: 'test devices',
+      baseId: configState.live.id,
+    });
+    await loadConfig({ keepEdits: true });
+    box.textContent = `Saved as v${saved.id}.`;
+    box.className = 'msg ok';
+  } catch (failure) {
+    const details = failure.body?.errors ? ': ' + failure.body.errors.join('; ') : '';
+    box.textContent = `Not saved: ${failure.message}${details}${failure.status === 409 ? ' — reload the page.' : ''}`;
+    box.className = 'msg bad';
+  }
+});
 
 document.getElementById('configDiffEdit').addEventListener('click', () => {
   const edited = editedConfig();

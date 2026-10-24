@@ -37,6 +37,38 @@
   .history button.armed { border-color: var(--c2); color: var(--c2); }
   .msg.ok { color: var(--c3); }
   .msg.bad { color: var(--c2); white-space: pre-line; }
+  .cardhead { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 8px 16px; margin-bottom: 12px; }
+  .cardhead h2 { margin: 0; }
+  .modes { display: flex; flex-wrap: wrap; gap: 4px; }
+  .modes button, .edhead button, #abDiff, #abActions button, .abrow input { font: inherit; color: var(--text); background: var(--card);
+         border: 1px solid var(--line); border-radius: 6px; padding: 5px 10px; }
+  .modes button, .edhead button, #abDiff, #abActions button { cursor: pointer; }
+  .modes button.on { border-color: var(--c1); color: var(--c1); }
+  .abpanel { background: var(--bg); border: 1px solid var(--line); border-radius: 8px; padding: 12px; margin-bottom: 12px; }
+  .abpanel > * + * { margin-top: 10px; }
+  .abrow { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 16px; }
+  /* The split slider is drawn as the split bar: A blue up to the thumb, B orange after it (--a set by app.js). */
+  .abrow input[type=range] { flex: 1 1 240px; appearance: none; -webkit-appearance: none; height: 10px; padding: 0; border: 0;
+         border-radius: 5px; background: linear-gradient(to right, var(--c1) var(--a, 50%), var(--c2) var(--a, 50%)); cursor: pointer; }
+  .abrow input[type=range]::-webkit-slider-thumb { -webkit-appearance: none; width: 18px; height: 18px; border-radius: 50%;
+         background: var(--card); border: 2px solid var(--text); }
+  .abrow input[type=range]::-moz-range-thumb { width: 14px; height: 14px; border-radius: 50%; background: var(--card); border: 2px solid var(--text); }
+  .abrow input[type=range]:focus-visible { outline: 2px solid var(--c1); outline-offset: 4px; }
+  .abrow input[type=number] { width: 72px; }
+  #abNow { margin-left: auto; font-variant-numeric: tabular-nums; }
+  .side-a { color: var(--c1); font-weight: 600; }
+  .side-b { color: var(--c2); font-weight: 600; }
+  .splitbar { display: flex; height: 10px; border-radius: 5px; overflow: hidden; }
+  .splitbar div:first-child { background: var(--c1); }
+  .splitbar div:last-child { background: var(--c2); }
+  .check { display: flex; align-items: center; gap: 8px; cursor: pointer; }
+  #testDevicesText { min-height: 140px; }
+  .editors { display: grid; grid-template-columns: repeat(auto-fit, minmax(320px, 1fr)); gap: 16px; }
+  .edhead { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+  .edlabel { display: block; font-weight: 600; margin-bottom: 6px; }
+  .edhead .edlabel { margin-bottom: 0; }
+  .edhead { margin-bottom: 6px; }
+  #abActions { display: contents; }
   .badge { font-size: 11px; color: var(--c3); border: 1px solid var(--c3); border-radius: 4px; padding: 0 4px; margin-left: 4px; }
   .history th, .history td { text-align: left; vertical-align: top; }
   .history td:last-child { white-space: nowrap; text-align: right; }
@@ -130,14 +162,56 @@
   </div>
   <div id="view-config" class="stack" hidden>
     <div class="card">
-      <h2>Live config <span class="muted" id="liveMeta"></span></h2>
-      <textarea id="configText" spellcheck="false"></textarea>
+      <div class="cardhead">
+        <h2>Live config <span class="muted" id="liveMeta"></span></h2>
+        <div class="modes" id="abModes" role="group" aria-label="Mode">
+          <button data-mode="off">Single config</button><button data-mode="ab">A/B test</button><button data-mode="rollout">Auto rollout</button>
+        </div>
+      </div>
+      <div class="abpanel" id="abPanel" hidden>
+        <div class="abrow" id="abFixed">
+          <label for="abSplit" class="side-a">Current <span id="abPctA"></span>%</label>
+          <input type="range" id="abSplit" min="0" max="100" step="1">
+          <span class="side-b">Experiment <span id="abPctB"></span>%</span>
+        </div>
+        <div class="abrow" id="abRollout">
+          <label>Experiment starts at <input type="number" id="abStartB" min="0" max="100" step="1"> %</label>
+          <label>Experiment reaches 100% on <input type="date" id="abEnd"></label>
+          <span id="abNow"></span>
+        </div>
+        <div class="splitbar" role="img" id="abBar"><div id="abBarA"></div><div id="abBarB"></div></div>
+        <div class="muted" id="abRule"></div>
+        <label class="check"><input type="checkbox" id="abTd"> <b>Test devices</b> <span class="muted" id="abTdHint">· always get the experiment</span></label>
+      </div>
+      <div class="editors">
+        <div>
+          <label for="configText" class="edlabel" id="configLabelA">Config</label>
+          <textarea id="configText" spellcheck="false"></textarea>
+        </div>
+        <div id="editorB" hidden>
+          <div class="edhead"><label for="configTextB" class="edlabel side-b" id="configLabelB">Experiment</label><button id="abCopy">Copy current into experiment</button></div>
+          <textarea id="configTextB" spellcheck="false"></textarea>
+        </div>
+      </div>
       <div class="actions">
         <input id="configNote" placeholder="What changed (optional)">
+        <button id="abDiff" hidden>Diff current vs experiment</button>
+        <span id="abActions" hidden>
+          <button id="abEndA">End: keep current</button>
+          <button id="abEndB">End: make experiment live</button>
+        </span>
         <button id="configDiffEdit">Diff my edit</button>
         <button id="configSave" class="primary">Save as new version</button>
       </div>
       <div class="msg" id="configMsg"></div>
+    </div>
+    <div class="card">
+      <h2>Test devices <span class="muted">· kept across A/B tests; a test that ticks “Test devices” sends them to its experiment</span></h2>
+      <textarea id="testDevicesText" spellcheck="false" placeholder="One device per line: device ID, then an optional label"></textarea>
+      <div class="actions">
+        <button id="testDevicesSave" class="primary">Save test devices</button>
+        <span class="msg" id="testDevicesMsg"></span>
+      </div>
     </div>
     <div class="card" id="diffCard" hidden><h2 id="diffTitle"></h2><pre class="diff" id="diffBody"></pre></div>
     <div class="card"><h2>History <span class="muted">· newest first; the API picks up the live version within a minute</span></h2><div id="history"></div></div>
