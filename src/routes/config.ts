@@ -11,14 +11,16 @@ import { header } from '../headers.js'
  */
 export default async function configRoutes(app: FastifyInstance): Promise<void> {
   app.get('/v1/config', async (req) => {
-    // The common context — os, arch, appVer, device uuid — rides as headers on every API call;
-    // this route reads all but the uuid. Fastify lowercases header names.
+    // The common context — os, arch, appVer, device uuid — rides as headers on every API call.
+    // The uuid picks the side of a running A/B test. Fastify lowercases header names.
     const os = (header(req.headers['x-os']) ?? '').toLowerCase()
     // || not ??: parseInt returns NaN, which is nullish to nobody, and NaN < anything is false — so
     // a junk appVer would silently mean "up to date" rather than falling back to -1.
     const appVer = Number.parseInt(header(req.headers['x-app-ver']) ?? '', 10) || -1
     const arch = (header(req.headers['x-arch']) ?? '').toLowerCase()
 
-    return resolveAppConfig(await app.appConfig.current(), { os, arch, appVer })
+    const deviceId = (header(req.headers['x-device-id']) ?? '').trim()
+
+    return resolveAppConfig(await app.appConfig.current(), { os, arch, appVer, deviceId })
   })
 }

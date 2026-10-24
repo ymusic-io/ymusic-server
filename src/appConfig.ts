@@ -1,3 +1,5 @@
+import { createHash } from 'node:crypto'
+
 /**
  * A published app build. `sha256` is of the installer at `url` (APK, DMG, MSI or DEB); `signature`
  * is ECDSA P-256 over `app-<platform>:<versionCode>:<sha256>`, made OFFLINE with
@@ -35,8 +37,8 @@ export interface SignedBundle {
   signature: string
 }
 
-/** One version of everything /v1/config answers from, as stored in app_config. */
-export interface AppConfig {
+/** One whole config: what a caller is answered from. */
+export interface BaseConfig {
   /** Sent to every caller under `features`. */
   flags: Record<string, unknown>
   /** Per x-os (lower-case) overrides of [flags]. */
@@ -52,6 +54,35 @@ export interface AppConfig {
    */
   engineJs: SignedBundle | null
   playerJs: SignedBundle | null
+}
+
+/**
+ * An A/B test of two whole configs: the stored one is A, [b] is B. A device's bucket is
+ * hash(device ID) % 100 — the same device always lands in the same bucket — and buckets below A's
+ * share get A. Exactly one of [percentB] (a fixed split) and [rollout] (B's share rising in a
+ * straight line from `startB` at `startAt` to 100 at `endAt`) is set. As a rollout's B share
+ * grows, devices only ever move from A to B.
+ */
+export interface AbTest {
+  b: BaseConfig
+  percentB?: number
+  rollout?: { startB: number; startAt: string; endAt: string }
+  /** Whether the [AppConfig.testDevices] always get B, whatever their bucket. */
+  testDevices: boolean
+}
+
+/** A device kept for testing, across A/B tests. */
+export interface TestDevice {
+  id: string
+  label?: string
+}
+
+/** One version of everything /v1/config answers from, as stored in app_config. */
+export interface AppConfig extends BaseConfig {
+  /** The running A/B test, if any. Absent = everyone gets this config. */
+  ab?: AbTest
+  /** Our own devices, kept from one A/B test to the next. Absent = none. */
+  testDevices?: TestDevice[]
 }
 
 /** The first stored version, seeded into an empty app_config. */
@@ -78,6 +109,53 @@ const isObject = (value: unknown): value is Record<string, unknown> =>
 /** What is wrong with [value] as an AppConfig, one message per problem; empty = valid. */
 export function validateAppConfig(value: unknown): string[] {
   if (!isObject(value)) return ['the config must be a JSON object']
+  const { ab, testDevices, ...base } = value
+  const errors = validateBaseConfig(base)
+  if (ab !== undefined) errors.push(...validateAbTest(ab))
+  if (testDevices !== undefined) {
+    const valid = (device: unknown) =>
+      isObject(device) && typeof device.id === 'string' && device.id !== '' &&
+      (device.label === undefined || typeof device.label === 'string')
+    if (!Array.isArray(testDevices) || !testDevices.every(valid)) {
+      errors.push('testDevices must be a list of { id, label? }')
+    }
+  }
+  return errors
+}
+
+function validateAbTest(ab: unknown): string[] {
+  if (!isObject(ab)) return ['ab must be an object']
+  const errors: string[] = []
+  const known = new Set(['b', 'percentB', 'rollout', 'testDevices'])
+  for (const key of Object.keys(ab)) if (!known.has(key)) errors.push(`unknown key "ab.${key}"`)
+
+  if (!isObject(ab.b)) errors.push('ab.b must be a whole config')
+  else errors.push(...validateBaseConfig(ab.b).map((error) => `ab.b: ${error}`))
+
+  const isPercent = (n: unknown) => typeof n === 'number' && n >= 0 && n <= 100
+  if ((ab.percentB === undefined) === (ab.rollout === undefined)) {
+    errors.push('ab needs exactly one of percentB and rollout')
+  }
+  if (ab.percentB !== undefined && !isPercent(ab.percentB)) errors.push('ab.percentB must be a number from 0 to 100')
+  if (ab.rollout !== undefined) {
+    const rollout = ab.rollout
+    if (!isObject(rollout)) errors.push('ab.rollout must be an object')
+    else {
+      if (!isPercent(rollout.startB)) errors.push('ab.rollout.startB must be a number from 0 to 100')
+      const time = (key: 'startAt' | 'endAt') => {
+        const ms = typeof rollout[key] === 'string' ? Date.parse(rollout[key]) : Number.NaN
+        if (Number.isNaN(ms)) errors.push(`ab.rollout.${key} must be a date`)
+        return ms
+      }
+      const start = time('startAt'), end = time('endAt')
+      if (end <= start) errors.push('ab.rollout.endAt must be after startAt')
+    }
+  }
+  if (typeof ab.testDevices !== 'boolean') errors.push('ab.testDevices must be true or false')
+  return errors
+}
+
+function validateBaseConfig(value: Record<string, unknown>): string[] {
   const errors: string[] = []
   const known = new Set(['flags', 'flagsByOs', 'releases', 'engineJs', 'playerJs'])
   for (const key of Object.keys(value)) if (!known.has(key)) errors.push(`unknown key "${key}"`)
@@ -135,12 +213,40 @@ export function validateAppConfig(value: unknown): string[] {
 }
 
 /** The release for this caller: `<os>-<arch>`, or `<os>` for a caller that sends no arch. */
-function releaseFor(releases: AppConfig['releases'], os: string, arch: string): AppRelease | null {
+function releaseFor(releases: BaseConfig['releases'], os: string, arch: string): AppRelease | null {
   return (arch === '' ? releases[os] : releases[`${os}-${arch}`]) ?? null
 }
 
+/** B's share of devices, 0–100, at [now]. */
+export function percentB(ab: AbTest, now: number): number {
+  if (ab.percentB !== undefined) return ab.percentB
+  const { startB, startAt, endAt } = ab.rollout!
+  const start = Date.parse(startAt), end = Date.parse(endAt)
+  const progress = Math.min(1, Math.max(0, (now - start) / (end - start)))
+  return startB + (100 - startB) * progress
+}
+
+/** The device's bucket, 0–99: stable for a device ID, whatever the config. */
+export function bucketOf(deviceId: string): number {
+  return createHash('sha256').update(deviceId.toLowerCase()).digest().readUInt32BE(0) % 100
+}
+
+/** Which config of the A/B test the device gets. No device ID gets A. */
+export function variantFor(ab: AbTest, testDevices: TestDevice[], deviceId: string, now: number): 'A' | 'B' {
+  if (deviceId === '') return 'A'
+  const id = deviceId.toLowerCase()
+  if (ab.testDevices && testDevices.some((test) => test.id.trim().toLowerCase() === id)) return 'B'
+  return bucketOf(id) < 100 - percentB(ab, now) ? 'A' : 'B'
+}
+
 /** The /v1/config answer for one caller. */
-export function resolveAppConfig(config: AppConfig, caller: { os: string; arch: string; appVer: number }) {
+export function resolveAppConfig(
+  stored: AppConfig,
+  caller: { os: string; arch: string; appVer: number; deviceId: string },
+  now = Date.now(),
+) {
+  const { ab, testDevices = [], ...a } = stored
+  const config = ab && variantFor(ab, testDevices, caller.deviceId, now) === 'B' ? ab.b : a
   const release = releaseFor(config.releases, caller.os, caller.arch)
   return {
     features: { ...config.flags, ...config.flagsByOs[caller.os] },

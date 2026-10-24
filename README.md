@@ -140,8 +140,15 @@ in `releases`, offered to every build of that platform below its `versionCode`.
 
 `x-os` is a coarse platform name (`windows`, `android`, …) and `x-arch` the desktop CPU (`x64`,
 `arm64`), both matched lower-case. `x-app-ver` is the caller's build number; a missing or unparseable one falls back to `-1`, which is older than every release, so
-such a caller is offered the update rather than quietly left behind. `x-device-id` is accepted for
-staged rollouts but no rule reads it yet.
+such a caller is offered the update rather than quietly left behind.
+
+One A/B test can run at a time, of two whole configs: the stored config is A ("current" in the dashboard), `ab.b` is B (the "experiment"). A
+device's bucket is `sha256(x-device-id) % 100`, so it never changes; buckets below A's share get A.
+The split is fixed (`ab.percentB`) or an auto rollout (`ab.rollout`: B's share rises in a straight
+line from `startB` at `startAt` to 100% at `endAt`, worked out on every request, so devices only move
+from A to B). `testDevices` (`[{ id, label? }]`) is our own devices, kept from one test to the next; while
+`ab.testDevices` is true they always get B. A caller without `x-device-id` gets A.
+Ending the test is a save without `ab` — keeping A, or with B copied in as the config.
 
 ## Caching and static files
 
