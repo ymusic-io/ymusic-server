@@ -66,7 +66,17 @@ YM_UPDATE_SIGNING_KEY=<base64 PKCS#8 P-256 key> \
 
 Upload the installer to that url, then paste the printed entry into its platform's slot in
 `releases` in the dashboard's App config and save. The signature covers
-`app-<platform>:<versionCode>:<sha256 of the installer>`.
+`app-<platform>:<versionCode>:<sha256 of the installer>`. The release job prints every platform's
+entry at once (`update-config.json`, YMusicV4 `.github/update-config.mjs`).
+
+Two optional fields route a build to the browser instead of "Install now":
+
+- `"installInApp": false` — no build installs this one in place (e.g. signed with another key).
+- `"minVersion": 18` — builds below 18 do not; 18 and newer still install in place. For builds whose
+  updater cannot finish this upgrade. The caller gets `installInApp: false` (the field itself is not
+  sent), which every shipped app since 4.0 follows.
+
+Either needs `"downloadPage"`, the page the dialog's "Download" opens.
 
 ## QR sign-in relay
 
@@ -137,7 +147,8 @@ quietly without that route.
 
 They are data, edited in the dashboard's App config (shape: [`src/appConfig.ts`](src/appConfig.ts)).
 `flags` go to every caller under `features`, `flagsByOs.<os>` overrides them for one platform. A release is one entry
-in `releases`, offered to every build of that platform below its `versionCode`.
+in `releases`, offered to every build of that platform below its `versionCode` — in place, or as a
+download for builds below its `minVersion`.
 
 `x-os` is a coarse platform name (`windows`, `android`, …) and `x-arch` the desktop CPU (`x64`,
 `arm64`), both matched lower-case. `x-app-ver` is the caller's build number; a missing or unparseable one falls back to `-1`, which is older than every release, so

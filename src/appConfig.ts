@@ -24,6 +24,12 @@ export interface AppRelease {
    * Absent = true.
    */
   installInApp?: boolean
+  /**
+   * The oldest build that may install this one in place. Callers below it are answered with
+   * `installInApp: false`, so they download from [downloadPage] instead — for builds whose updater
+   * cannot finish this upgrade. Absent = every older build installs in place.
+   */
+  minVersion?: number
 }
 
 /**
@@ -203,6 +209,13 @@ function validateBaseConfig(value: Record<string, unknown>): string[] {
       if (release.installInApp === false && typeof release.downloadPage !== 'string') {
         errors.push(`${where}.downloadPage is required when installInApp is false`)
       }
+      if (release.minVersion !== undefined) {
+        if (!Number.isSafeInteger(release.minVersion) || (release.minVersion as number) < 1) {
+          errors.push(`${where}.minVersion must be a positive whole number`)
+        } else if (typeof release.downloadPage !== 'string') {
+          errors.push(`${where}.downloadPage is required when minVersion is set`)
+        }
+      }
     }
   }
   for (const name of ['engineJs', 'playerJs'] as const) {
@@ -241,6 +254,12 @@ export function variantFor(ab: AbTest, testDevices: TestDevice[], deviceId: stri
   return bucketOf(id) < 100 - percentB(ab, now) ? 'A' : 'B'
 }
 
+/** [release] as offered to a build at [appVer]: below its minVersion, the download page only. */
+function offerTo(release: AppRelease, appVer: number) {
+  const { minVersion, ...offer } = release
+  return minVersion !== undefined && appVer < minVersion ? { ...offer, installInApp: false } : offer
+}
+
 /** The /v1/config answer for one caller. */
 export function resolveAppConfig(
   stored: AppConfig,
@@ -252,7 +271,7 @@ export function resolveAppConfig(
   const release = releaseFor(config.releases, caller.os, caller.arch)
   return {
     features: { ...config.flags, ...config.flagsByOs[caller.os] },
-    appUpdate: release && caller.appVer < release.versionCode ? release : null,
+    appUpdate: release && caller.appVer < release.versionCode ? offerTo(release, caller.appVer) : null,
     engineJs: config.engineJs,
     playerJs: config.playerJs,
   }
