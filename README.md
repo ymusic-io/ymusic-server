@@ -15,7 +15,7 @@ GET /healthz
     "versionCode": 1234,
     "versionName": "4.1.0",
     "notes": "What changed",
-    "url": "https://cfg.ymusic.io/static/YMusic-4.1.0.msi",
+    "url": "https://github.com/ymusic-io/YMusicV4/releases/download/release-v4.1.0/windows-x64-setup.exe",
     "size": 98765432,
     "sha256": "9f2c…",
     "signature": "MEUCIQ…"
@@ -26,7 +26,8 @@ GET /healthz
 ```
 
 `appUpdate` is `null` when the caller is already current, or when its platform has no release.
-Desktop platforms are keyed by OS and arch (`macos-arm64`, `windows-x64`, …). Android sends its
+Desktop platforms are keyed by OS and arch (`macos-arm64`, `macos-x64`, `windows-x64`,
+`windows-arm64`, `linux-x64`, `linux-arm64`). Android sends its
 primary ABI and gets the APK for it (`android-armeabi-v7a`, `android-arm64-v8a`, `android-x86`,
 `android-x86_64`); there is no universal APK.
 
@@ -53,14 +54,14 @@ as the other bundle without signing it again.
 
 ## Publishing an app release
 
-Each `appUpdate` is the whole installer — an APK, DMG, MSI or DEB — signed with the UPDATE key (a
+Each `appUpdate` is the whole installer — an APK, DMG, Inno Setup EXE or DEB — signed with the UPDATE key (a
 different key from the bundle one). Desktop installs nothing whose signature does not match; Android
 relies on the OS, which only installs an APK signed with the installed app's certificate.
 
 ```bash
 YM_UPDATE_SIGNING_KEY=<base64 PKCS#8 P-256 key> \
-  node scripts/sign-app-update.mjs windows-x64 1234 4.1.0 YMusic-4.1.0.msi \
-    https://cfg.ymusic.io/static/YMusic-4.1.0.msi notes.txt
+  node scripts/sign-app-update.mjs windows-x64 1234 4.1.0 windows-x64-setup.exe \
+    https://github.com/ymusic-io/YMusicV4/releases/download/release-v4.1.0/windows-x64-setup.exe notes.txt
 ```
 
 Upload the installer to that url, then paste the printed entry into its platform's slot in

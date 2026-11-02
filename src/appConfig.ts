@@ -1,7 +1,7 @@
 import { createHash } from 'node:crypto'
 
 /**
- * A published app build. `sha256` is of the installer at `url` (APK, DMG, MSI or DEB); `signature`
+ * A published app build. `sha256` is of the installer at `url` (APK, DMG, setup EXE or DEB); `signature`
  * is ECDSA P-256 over `app-<platform>:<versionCode>:<sha256>`, made OFFLINE with
  * `scripts/sign-app-update.mjs` — the desktop app installs nothing without it. Offered to builds
  * whose x-app-ver is below `versionCode`.
@@ -97,7 +97,9 @@ export const DEFAULT_APP_CONFIG: AppConfig = {
     'macos-arm64': null,
     'macos-x64': null,
     'windows-x64': null,
+    'windows-arm64': null,
     'linux-x64': null,
+    'linux-arm64': null,
   },
   engineJs: null,
   playerJs: null,
